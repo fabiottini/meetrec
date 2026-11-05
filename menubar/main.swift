@@ -8,7 +8,7 @@ import SwiftUI
 let home = FileManager.default.homeDirectoryForCurrentUser.path
 let meetBin = "\(home)/.local/bin/meet"   // wrapper installed by install.sh
 let stateFile = "\(home)/.local/state/meetrec/current.json"
-let configFile = "\(home)/.config/meetrec/config.json"
+let configFile = ProcessInfo.processInfo.environment["MEETREC_CONFIG_FILE"] ?? "\(home)/.config/meetrec/config.json"
 let appLog = "\(home)/.local/state/meetrec/app.log"
 
 // MARK: - process helper
@@ -245,7 +245,7 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         // a grouped Form scrolls and has no intrinsic height: give the window a real size
-        .frame(width: 560, height: 700)
+        .frame(width: 560, height: 840)
         .padding(.bottom, 8)
     }
 }
@@ -261,24 +261,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var recover: [[String: Any]] = []
     var settingsWindow: NSWindow?
     let settings = Settings()
+    let levels = LevelController()
+    lazy var levelItem: NSMenuItem = {
+        let i = NSMenuItem()
+        i.view = levels.view
+        return i
+    }()
 
     func applicationDidFinishLaunching(_ n: Notification) {
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         let menu = NSMenu()
         menu.delegate = self
         item.menu = menu
-        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.refresh() }
+        timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in self?.refresh() }
+        levels.currentDir = { [weak self] in
+            guard let c = self?.current(), c.alive else { return nil }
+            return c.dir
+        }
+        levels.config = {
+            (try? JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: configFile)))) as? [String: Any] ?? [:]
+        }
+        levels.saveConfig = { c in
+            if let d = try? JSONSerialization.data(withJSONObject: c, options: [.prettyPrinted, .sortedKeys]) {
+                try? d.write(to: URL(fileURLWithPath: configFile), options: .atomic)
+            }
+        }
         refresh()
         loadRecover()
+        // used to take README screenshots, and handy from a terminal: open -a MeetRec --args --settings
+        let args = CommandLine.arguments
+        if args.contains("--settings") { openSettings() }
+        if args.contains("--open-menu") {
+            // pop the same menu at a fixed spot (works even when a menu bar manager hides the icon)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                let top = NSScreen.main.map { $0.frame.maxY - 60 } ?? 800
+                self.item.menu?.popUp(positioning: nil, at: NSPoint(x: 120, y: top), in: nil)
+            }
+        }
     }
 
+    func menuWillOpen(_ menu: NSMenu) { levels.open() }
+    func menuDidClose(_ menu: NSMenu) { levels.close() }
+
     // current recording from the CLI state file (works also if started from the terminal)
-    func current() -> (start: Date, title: String?, alive: Bool)? {
+    func current() -> (start: Date, title: String?, alive: Bool, dir: String)? {
         guard let d = FileManager.default.contents(atPath: stateFile),
               let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
               let s = j["started_at"] as? String, let pid = j["pid"] as? Int,
               let start = ISO8601DateFormatter().date(from: s) else { return nil }
-        return (start, j["title"] as? String, kill(pid_t(pid), 0) == 0)
+        return (start, j["title"] as? String, kill(pid_t(pid), 0) == 0, j["dir"] as? String ?? "")
     }
 
     func elapsed(_ since: Date) -> String {
@@ -287,19 +318,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                          : String(format: "%02d:%02d", s / 60, s % 60)
     }
 
+    /// Menu bar glyph: rounded square with a waveform.
+    /// idle/processing: template (follows light/dark menu bar), waveform cut out of a solid tile.
+    /// recording: red tile with white bars that follow the real mic level; dead: orange.
+    func glyph(fill: NSColor?, level: Double?) -> NSImage {
+        let img = NSImage(size: NSSize(width: 19, height: 18), flipped: false) { _ in
+            // rounded square ("mini app icon"): distinct from mic glyphs and round VPN/record dots
+            let tile = NSBezierPath(roundedRect: NSRect(x: 1.5, y: 1, width: 16, height: 16), xRadius: 4.5, yRadius: 4.5)
+            (fill ?? .black).setFill()
+            tile.fill()
+
+            var heights: [CGFloat] = [3.5, 7.5, 11, 6.5, 3.5]
+            if let db = level {            // live: scale the bars with the mic level (-60..0 dB)
+                let f = CGFloat(max(0.2, min(1, (db + 55) / 40)))
+                heights = heights.map { max(1.6, $0 * f) }
+            }
+            let w: CGFloat = 1.6, gap: CGFloat = 1.3
+            var x = 9.5 - (CGFloat(heights.count) * w + CGFloat(heights.count - 1) * gap) / 2
+            let cy: CGFloat = 9
+            for h in heights {
+                let r = NSBezierPath(roundedRect: NSRect(x: x, y: cy - h / 2, width: w, height: h), xRadius: w / 2, yRadius: w / 2)
+                if fill == nil {
+                    NSGraphicsContext.current?.compositingOperation = .destinationOut
+                    NSColor.black.setFill()
+                } else {
+                    NSColor.white.setFill()
+                }
+                r.fill()
+                x += w + gap
+            }
+            NSGraphicsContext.current?.compositingOperation = .sourceOver
+            return true
+        }
+        img.isTemplate = (fill == nil)
+        img.accessibilityDescription = "MeetRec"
+        return img
+    }
+
     func refresh() {
         guard let b = item.button else { return }
         if let c = current() {
-            let img = NSImage(systemSymbolName: c.alive ? "record.circle.fill" : "exclamationmark.triangle.fill",
-                              accessibilityDescription: "MeetRec")
-            img?.isTemplate = false
-            b.image = img?.withSymbolConfiguration(.init(paletteColors: [c.alive ? .systemRed : .systemOrange]))
+            let db = LevelController.readLevels(c.dir)["mic"]?.0 ?? -120
+            b.image = c.alive ? glyph(fill: .systemRed, level: db) : glyph(fill: .systemOrange, level: nil)
             b.title = " " + elapsed(c.start)
         } else if processing {
-            b.image = NSImage(systemSymbolName: "waveform", accessibilityDescription: "MeetRec")
+            b.image = glyph(fill: nil, level: nil)
             b.title = " …"
         } else {
-            b.image = NSImage(systemSymbolName: "mic", accessibilityDescription: "MeetRec")
+            b.image = glyph(fill: nil, level: nil)
             b.title = ""
         }
         b.imagePosition = .imageLeading
@@ -315,6 +381,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
         let cur = current()
+        menu.addItem(levelItem)
+        menu.addItem(.separator())
         func add(_ title: String, _ action: Selector?, key: String = "", enabled: Bool = true) -> NSMenuItem {
             let i = NSMenuItem(title: title, action: action, keyEquivalent: key)
             i.target = self; i.isEnabled = enabled && action != nil
@@ -436,7 +504,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let w = NSWindow(contentViewController: NSHostingController(rootView: SettingsView(s: settings)))
             w.title = "MeetRec – Impostazioni"
             w.styleMask = [.titled, .closable, .resizable]
-            w.setContentSize(NSSize(width: 560, height: 700))
+            w.setContentSize(NSSize(width: 560, height: 840))
             w.isReleasedWhenClosed = false
             settingsWindow = w
         }
@@ -458,8 +526,80 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 }
 
+// MARK: - README images, drawn offscreen with demo data: MeetRec --render-docs <dir>
+
+func savePNG(_ view: NSView, _ path: String, scale: CGFloat = 2) {
+    let size = view.bounds.size
+    let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size.width * scale), pixelsHigh: Int(size.height * scale),
+                               bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                               colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+    rep.size = size
+    view.cacheDisplay(in: view.bounds, to: rep)
+    try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+}
+
+func renderDocs(_ dir: String, _ d: AppDelegate) {
+    let dark = NSAppearance(named: .darkAqua)!
+    NSAppearance.current = dark
+
+    // level panel
+    let lv = LevelView()
+    lv.micName = "MacBook Pro Microphone"
+    lv.history = (0..<90).map { i in
+        let t = Double(i)
+        return i % 23 < 4 ? -70 : -27 + 9 * sin(t / 2.3) + 4 * sin(t * 1.7)
+    }
+    lv.mic = (-21, -8)
+    lv.sys = (-25, -11)
+    lv.setVolume(0.62)
+    lv.agcBox.state = .on
+    let panel = NSView(frame: lv.frame)
+    panel.appearance = dark
+    panel.wantsLayer = true
+    panel.layer?.backgroundColor = NSColor(white: 0.16, alpha: 1).cgColor
+    panel.layer?.cornerRadius = 10
+    panel.addSubview(lv)
+    savePNG(panel, dir + "/levels.png")
+
+    // menu bar states
+    let bar = NSView(frame: NSRect(x: 0, y: 0, width: 250, height: 28))
+    bar.appearance = dark
+    bar.wantsLayer = true
+    bar.layer?.backgroundColor = NSColor(white: 0.12, alpha: 1).cgColor
+    let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.menuBarFont(ofSize: 0), .foregroundColor: NSColor.white]
+    let states: [(NSImage, String, String)] = [
+        (d.glyph(fill: nil, level: nil), "", "pronto"),
+        (d.glyph(fill: .systemRed, level: -20), " 12:34", "registra"),
+    ]
+    var x: CGFloat = 10
+    for (img, title, caption) in states {
+        let iv = NSImageView(frame: NSRect(x: x, y: 5, width: 19, height: 18))
+        img.isTemplate = false
+        if title.isEmpty {   // template glyph: tint it white like the real menu bar does
+            let tinted = NSImage(size: img.size, flipped: false) { r in
+                img.draw(in: r); NSColor.white.set(); r.fill(using: .sourceAtop); return true
+            }
+            iv.image = tinted
+        } else { iv.image = img }
+        bar.addSubview(iv)
+        let tf = NSTextField(labelWithAttributedString: NSAttributedString(string: title, attributes: attrs))
+        tf.frame = NSRect(x: x + 20, y: 5, width: 60, height: 18)
+        if !title.isEmpty { bar.addSubview(tf) }
+        let cap = NSTextField(labelWithString: caption)
+        cap.font = .systemFont(ofSize: 10); cap.textColor = .secondaryLabelColor
+        cap.frame = NSRect(x: x + (title.isEmpty ? 26 : 74), y: 6, width: 60, height: 14)
+        bar.addSubview(cap)
+        x += title.isEmpty ? 90 : 150
+    }
+    savePNG(bar, dir + "/menubar.png")
+}
+
 let app = NSApplication.shared
 let delegate = AppDelegate()
+if let i = CommandLine.arguments.firstIndex(of: "--render-docs"), i + 1 < CommandLine.arguments.count {
+    renderDocs(CommandLine.arguments[i + 1], delegate)
+    exit(0)
+}
 app.delegate = delegate
 app.setActivationPolicy(.accessory)
 app.run()

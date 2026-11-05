@@ -48,6 +48,7 @@ DEFAULTS = {
     "ffmpeg": shutil.which("ffmpeg") or "/opt/homebrew/bin/ffmpeg",
     "capture_bin": str(APP_DIR / "capture" / "meetrec-capture"),
     "mic_id": None,
+    "auto_gain": True,                                 # lower the mic input volume when it clips
     "summary": True,
     "summary_cmd": ["claude", "-p", "--model", "sonnet"],
     "keep_raw": False,
@@ -59,7 +60,7 @@ DEFAULTS = {
 
 
 USER_KEYS = ["recordings_dir", "vault", "meetings_dir", "people_dir", "context", "language", "me",
-             "others_label", "mic_id", "summary", "keep_raw"]
+             "others_label", "mic_id", "auto_gain", "summary", "keep_raw"]
 
 
 def load_conf():
@@ -123,6 +124,8 @@ def cmd_start(a):
         cmd.append("--no-mic")
     if C.get("mic_id"):
         cmd += ["--mic-id", C["mic_id"]]
+    if C.get("auto_gain", True):
+        cmd.append("--auto-gain")
     logf = open(d / "capture.log", "ab")
     p = subprocess.Popen(cmd, stdout=logf, stderr=logf, stdin=subprocess.DEVNULL, start_new_session=True)
     # keep the Mac awake while recording

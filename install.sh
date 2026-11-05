@@ -16,7 +16,7 @@ echo "==> python venv"
 .venv/bin/pip install -q --upgrade pip msal
 
 echo "==> recorder"
-swiftc -O -o capture/meetrec-capture capture/main.swift
+swiftc -O -o capture/meetrec-capture capture/main.swift shared/MicVolume.swift
 
 echo "==> meet CLI"
 mkdir -p "$HOME/.local/bin"
@@ -31,8 +31,10 @@ echo "==> menu bar app"
 APP="$HOME/Applications/MeetRec.app"
 BUILD=$(mktemp -d)
 mkdir -p "$BUILD/MeetRec.app/Contents/MacOS"
-swiftc -O -o "$BUILD/MeetRec.app/Contents/MacOS/MeetRec" menubar/MeetRec.swift
+swiftc -O -o "$BUILD/MeetRec.app/Contents/MacOS/MeetRec" menubar/main.swift menubar/LevelPanel.swift shared/MicVolume.swift
 cp menubar/Info.plist "$BUILD/MeetRec.app/Contents/Info.plist"
+mkdir -p "$BUILD/MeetRec.app/Contents/Resources"
+cp assets/AppIcon.icns "$BUILD/MeetRec.app/Contents/Resources/AppIcon.icns"
 codesign --force --sign - "$BUILD/MeetRec.app"
 pkill -x MeetRec 2>/dev/null || true
 mkdir -p "$HOME/Applications"

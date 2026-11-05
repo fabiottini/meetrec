@@ -4,7 +4,7 @@
 // as it arrives, so whatever is already on disk can always be recovered,
 // even if the process is killed. Conversion to m4a/wav happens later in `meet`.
 //
-// Usage: meetrec-capture <out_dir> [--no-mic] [--no-system] [--mic-id <AVCaptureDevice uniqueID>]
+// Usage: meetrec-capture <out_dir> [--no-mic] [--no-system] [--mic-id <AVCaptureDevice uniqueID>] [--auto-gain]
 // Stop with SIGINT/SIGTERM. Writes <out_dir>/<track>.s16 + <track>.json + capture.done
 
 import AVFoundation
@@ -28,6 +28,30 @@ final class Track {
     var startPTS: Double? = nil     // host time (seconds) of the first sample in this track
     var segment = 0
     var lastSync = Date()
+    // level window (reset every 100 ms by the meter timer)
+    var winPeak: Int32 = 0
+    var winSumSq: Double = 0
+    var winN = 0
+    var winClipped = 0
+
+    func measure(_ s: [Int16]) {
+        for v in s {
+            let a = abs(Int32(v))
+            if a > winPeak { winPeak = a }
+            if a >= 32000 { winClipped += 1 }
+            winSumSq += Double(v) * Double(v)
+        }
+        winN += s.count
+    }
+
+    /// (rms dB, peak dB, clipped samples) for the window, then reset
+    func takeWindow() -> (Double, Double, Int) {
+        defer { winPeak = 0; winSumSq = 0; winN = 0; winClipped = 0 }
+        guard winN > 0 else { return (-120, -120, 0) }
+        let rms = (winSumSq / Double(winN)).squareRoot() / 32768
+        let peak = Double(winPeak) / 32768
+        return (rms > 0 ? 20 * log10(rms) : -120, peak > 0 ? 20 * log10(peak) : -120, winClipped)
+    }
 
     init(name: String, dir: URL) { self.name = name; self.dir = dir }
 
@@ -70,6 +94,9 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
     let wantSystem: Bool
     let micID: String?
     var stream: SCStream?
+    var meter: DispatchSourceTimer?
+    lazy var agc = AutoGain(uid: micID, enabled: autoGain)
+    var autoGain = false
     let queue = DispatchQueue(label: "meetrec.audio")
     var t0: Double? = nil
     lazy var system = Track(name: "system", dir: self.dir)
@@ -102,10 +129,37 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
         if wantMic { try s.addStreamOutput(self, type: .microphone, sampleHandlerQueue: queue) }
         try await s.startCapture()
         stream = s
+        startMeter()
         log("recording started in \(dir.path) (system=\(wantSystem), mic=\(wantMic))")
     }
 
+    /// Every 100 ms: write <dir>/levels ("mic rms peak", "system rms peak", "volume v") for the app,
+    /// and lower the mic volume if it clips (auto gain).
+    func startMeter() {
+        if autoGain {
+            if let d = agc.dev {
+                if let v = MicVolume.get(d) { log("auto gain on, mic '\(MicVolume.name(d))' volume \(Int(v * 100))%") }
+                else { log("auto gain: mic '\(MicVolume.name(d))' has no adjustable input volume") }
+            }
+            agc.onChange = { v in log("auto gain: mic clipping, volume lowered to \(Int(v * 100))%") }
+        }
+        let t = DispatchSource.makeTimerSource(queue: queue)
+        t.schedule(deadline: .now() + 0.1, repeating: 0.1)
+        let levels = dir.appendingPathComponent("levels")
+        t.setEventHandler { [self] in
+            let m = mic.takeWindow(), s = system.takeWindow()
+            agc.observe(clipped: m.2)
+            var txt = String(format: "mic %.1f %.1f\nsystem %.1f %.1f\n", m.0, m.1, s.0, s.1)
+            if let d = agc.dev, let v = MicVolume.get(d) { txt += String(format: "volume %.2f\n", v) }
+            try? txt.write(to: levels, atomically: true, encoding: .utf8)
+        }
+        t.resume()
+        meter = t
+    }
+
     func stop() async {
+        meter?.cancel()
+        try? FileManager.default.removeItem(at: dir.appendingPathComponent("levels"))
         if let s = stream { try? await s.stopCapture() }
         queue.sync {
             system.close(); mic.close()
@@ -148,6 +202,7 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
         }
 
         let samples = Recorder.firstChannelS16(sb, fmt: fmt)
+        track.measure(samples)
         track.write(samples)
     }
 
@@ -192,18 +247,20 @@ if args.first == "--list-mics" {
     exit(0)
 }
 guard let outPath = args.first, !outPath.hasPrefix("-") else {
-    FileHandle.standardError.write("usage: meetrec-capture <out_dir> [--no-mic] [--no-system] [--mic-id ID] | --list-mics\n".data(using: .utf8)!)
+    FileHandle.standardError.write("usage: meetrec-capture <out_dir> [--no-mic] [--no-system] [--mic-id ID] [--auto-gain] | --list-mics\n".data(using: .utf8)!)
     exit(64)
 }
 args.removeFirst()
 var wantMic = true, wantSystem = true
 var micID: String? = nil
+var autoGainFlag = false
 while !args.isEmpty {
     let a = args.removeFirst()
     switch a {
     case "--no-mic": wantMic = false
     case "--no-system": wantSystem = false
     case "--mic-id": micID = args.isEmpty ? nil : args.removeFirst()
+    case "--auto-gain": autoGainFlag = true
     default: log("unknown option \(a)"); exit(64)
     }
 }
@@ -211,6 +268,7 @@ while !args.isEmpty {
 let outDir = URL(fileURLWithPath: outPath)
 try? FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
 let rec = Recorder(dir: outDir, wantMic: wantMic, wantSystem: wantSystem, micID: micID)
+rec.autoGain = autoGainFlag && wantMic
 
 signal(SIGINT, SIG_IGN); signal(SIGTERM, SIG_IGN); signal(SIGHUP, SIG_IGN)
 var sources: [DispatchSourceSignal] = []
