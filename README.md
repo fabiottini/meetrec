@@ -3,7 +3,7 @@
 # meet-rec-transcribe
 
 Registra i meeting sul Mac (la tua voce + quella degli altri partecipanti), li trascrive
-**in locale** con il motore di [Vibe](https://github.com/thewh1teagle/vibe), collega la registrazione
+**in locale** con [whisper.cpp](https://github.com/ggml-org/whisper.cpp), collega la registrazione
 all'evento del calendario Outlook e salva una nota in Obsidian, con riassunto opzionale.
 
 <p align="center"><img src="docs/menubar.png" width="250" alt="Icona nella barra dei menu: pronta e in registrazione"></p>
@@ -14,7 +14,7 @@ Due modi di usarlo, che condividono lo stesso stato:
 
 ## Perché
 
-L'app di Vibe a volte si blocca mentre salva una registrazione, e quando succede si perde tutto.
+Nasce perché l'app [Vibe](https://github.com/thewh1teagle/vibe) a volte si blocca mentre salva una registrazione, e quando succede si perde tutto.
 Qui la registrazione è separata dalla trascrizione: l'audio va su disco mentre registri, quindi un
 crash non lo fa perdere.
 
@@ -25,7 +25,7 @@ crash non lo fa perdere.
 - **Livelli in tempo reale** nel menu: forma d'onda del microfono, misuratori per te e per gli
   altri, volume d'ingresso regolabile.
 - **Riduzione automatica**: se il microfono va in saturazione, il volume d'ingresso scende da solo.
-- **Trascrizione locale** con whisper (large-v3-turbo); l'audio non lascia il Mac.
+- **Trascrizione locale** con whisper.cpp (large-v3-turbo) e filtro dei silenzi; l'audio non lascia il Mac.
 - **Chi parla**: le tue frasi e quelle degli altri sono separate grazie alle due tracce.
 - **Calendario Outlook**: titolo, invitati, agenda e link dell'evento in corso.
 - **Riassunto** opzionale con Claude (solo testo): sintesi, decisioni, action item, punti aperti.
@@ -49,37 +49,46 @@ In cima al menu c'è il pannello dei livelli:
 
 A menu aperto senza registrazione, il pannello ascolta il microfono: puoi regolarlo prima del meeting.
 
-## Requisiti
-
-- macOS 15 o successivo
-- Xcode Command Line Tools (`swiftc`)
-- `ffmpeg` (`brew install ffmpeg`)
-- [Vibe](https://github.com/thewh1teagle/vibe) in `/Applications`, con un modello whisper scaricato
-  (di default `ggml-large-v3-turbo.bin`)
-- Python 3.10 o successivo
-- opzionale: [Claude Code](https://claude.com/claude-code) (`claude`) per il riassunto
-
 ## Installazione
+
+L'app già compilata è nel repo: [`dist/MeetRec.zip`](dist/MeetRec.zip) (Apple Silicon e Intel, macOS 15+).
+
+1. Scarica `dist/MeetRec.zip` da GitLab, scompattalo e sposta **MeetRec** in Applicazioni.
+2. Aprila. L'app non è firmata con un certificato Apple, quindi la prima volta macOS la blocca:
+   vai in **Impostazioni di Sistema > Privacy e sicurezza** e premi **Apri comunque**.
+   In alternativa, da terminale: `xattr -dr com.apple.quarantine /Applications/MeetRec.app`.
+3. Si apre il **Setup**, che controlla tutto e installa quello che manca:
+
+| Voce | Cosa fa il pulsante |
+|---|---|
+| Homebrew | copia il comando di installazione e apre brew.sh |
+| Python 3, ffmpeg, whisper.cpp | `brew install …`, con il log visibile |
+| Modello di trascrizione | scarica whisper large-v3-turbo (1,6 GB) e il filtro dei silenzi; se c'è Vibe li copia da lì |
+| Permessi microfono e audio di sistema | li chiede a macOS (per l'audio di sistema poi va riaperta l'app) |
+| Vault Obsidian | scegli la cartella |
+| Calendario Outlook (opzionale) | login Microsoft, il codice è già negli appunti |
+| Claude Code (opzionale) | serve per il riassunto; senza, la nota ha solo il transcript |
+| Comando `meet` (opzionale) | installa `~/.local/bin/meet` che usa l'app |
+
+Il Setup si riapre da solo finché manca qualcosa di necessario; poi lo trovi nel menu, **Setup…**.
+Le altre opzioni (cartelle, microfono, lingua, riassunto…) sono in **Impostazioni**.
+
+> Se usi un gestore della barra dei menu (Ice, Bartender…), l'icona può finire nella zona nascosta:
+> trascinala fuori.
+
+### Compilare da sorgente
+
+Servono le Xcode Command Line Tools (`swiftc`).
 
 ```sh
 git clone git@gitlab.com:fabiottini/meet-rec-transcribe.git
 cd meet-rec-transcribe
-./install.sh
+./build.sh      # crea dist/MeetRec.app e dist/MeetRec.zip
+./install.sh    # build + copia in ~/Applications + avvio
 ```
 
-`install.sh` compila il registratore e l'app, crea `.venv` con `msal`, installa il comando
-`~/.local/bin/meet` e l'app `~/Applications/MeetRec.app`, poi avvia l'app.
-
-Poi apri **MeetRec > Impostazioni** e:
-1. scegli il **vault** Obsidian e le cartelle dei meeting e delle persone;
-2. fai **Login Microsoft**: si apre il browser e il codice è già negli appunti;
-3. se vuoi, attiva **Avvia MeetRec al login**.
-
-Alla prima registrazione macOS chiede due permessi per MeetRec: **Microfono** e **Registrazione
-schermo e audio di sistema**. Dopo averli concessi, chiudi e riapri MeetRec.
-
-> Se usi un gestore della barra dei menu (Ice, Bartender…), l'icona può finire nella zona nascosta:
-> trascinala fuori.
+Dopo una modifica, ricorda di committare anche `dist/MeetRec.zip`.
+Ogni nuova build ha una firma diversa: macOS chiede di nuovo i due permessi.
 
 ## Uso
 
@@ -129,7 +138,8 @@ Le cuffie Bluetooth (AirPods, Sony WH-1000XM…), quando usi il loro microfono, 
 2. **Audio**. Il grezzo diventa `mic.m4a`, `system.m4a` e `mix.m4a`. Il grezzo viene cancellato
    solo se le durate degli m4a tornano. A fine elaborazione resta solo `mix.m4a`: le trascrizioni delle due
    tracce sono salvate, quindi `meet process` può rifare la nota anche senza le tracce separate.
-3. **Trascrizione**. `vibe serve` in locale, una traccia alla volta, con i timestamp. Le tracce
+3. **Trascrizione**. `whisper-cli` (whisper.cpp) in locale, una traccia alla volta, con i timestamp e il
+   filtro dei silenzi (circa 2 volte più veloce). Se whisper.cpp manca e c'è Vibe, usa `vibe serve`. Le tracce
    distinguono chi parla: microfono = `me`, audio di sistema = `others_label`. Vengono scartati:
    - il testo che whisper inventa sulle tracce mute (controllo sul volume);
    - le frasi doppie che il microfono raccoglie dagli altoparlanti.
@@ -161,11 +171,13 @@ Le cuffie Bluetooth (AirPods, Sony WH-1000XM…), quando usi il loro microfono, 
 | `summary_cmd` | `["claude","-p","--model","sonnet"]` | il prompt arriva su stdin |
 | `keep_raw` | `false` | tiene anche il PCM grezzo |
 | `keep_tracks` | `false` | dopo l'elaborazione tiene anche `mic.m4a` e `system.m4a`; altrimenti resta solo `mix.m4a` |
-| `vibe_bin`, `vibe_model`, `ffmpeg` | path standard | |
+| `whisper_bin`, `whisper_model`, `vad_model` | trovati da soli | whisper.cpp e modelli (`~/Library/Application Support/MeetRec/models`) |
+| `whisper_threads` | `4` | thread per la trascrizione: tiene il Mac reattivo |
+| `ffmpeg`, `vibe_bin`, `vibe_model` | trovati da soli | Vibe solo come riserva |
 | `ms_client_id`, `ms_authority` | client pubblico, `organizations` | login device code, solo `Calendars.Read` |
 | `timezone` | `Europe/Rome` | |
 
-Il token Microsoft è in `~/.config/meetrec/msal_cache.json` (permessi 0600).
+Il token Microsoft è in `~/.config/meetrec/token.json` (permessi 0600). Il login usa solo la libreria standard di Python.
 
 ## Lingue
 
@@ -200,14 +212,16 @@ Per includerla nell'app, aggiungila a `locales/` e rilancia `./install.sh`.
 ## Struttura
 
 ```
+dist/MeetRec.zip          app già compilata (universale), pronta da scaricare
 capture/main.swift        registratore (ScreenCaptureKit), livelli, riduzione automatica
-menubar/main.swift        app barra dei menu (AppKit + SwiftUI), usa il comando `meet`
+menubar/main.swift        app barra dei menu (AppKit + SwiftUI)
+menubar/Setup.swift       setup guidato: dipendenze, modelli, permessi, vault, login
 menubar/LevelPanel.swift  pannello livelli audio e anteprima del microfono
 shared/MicVolume.swift    volume d'ingresso del microfono (Core Audio), condiviso
 menubar/Info.plist
+meet.py                   registrazione, audio, trascrizione, calendario, nota (anche CLI `meet`)
 locales/                  testi dell'interfaccia, un JSON per lingua
 assets/                   icona (make-icon.swift genera il PNG, AppIcon.icns per l'app)
 docs/                     immagini del README (MeetRec --render-docs docs)
-meet.py                   CLI: registrazione, audio, trascrizione, calendario, nota
-install.sh
+build.sh, install.sh
 ```

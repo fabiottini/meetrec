@@ -6,7 +6,11 @@ import ServiceManagement
 import SwiftUI
 
 let home = FileManager.default.homeDirectoryForCurrentUser.path
-let meetBin = "\(home)/.local/bin/meet"   // wrapper installed by install.sh
+// meet.py and the recorder ship inside the app; outside a bundle (dev runs) fall back to the CLI wrapper
+let bundledScript = Bundle.main.resourceURL.map { $0.appendingPathComponent("meet.py").path }
+    .flatMap { FileManager.default.fileExists(atPath: $0) ? $0 : nil }
+let bundledCapture = Bundle.main.bundlePath + "/Contents/MacOS/meetrec-capture"
+let meetBin = "\(home)/.local/bin/meet"
 let stateFile = "\(home)/.local/state/meetrec/current.json"
 let configFile = ProcessInfo.processInfo.environment["MEETREC_CONFIG_FILE"] ?? "\(home)/.config/meetrec/config.json"
 let appLog = "\(home)/.local/state/meetrec/app.log"
@@ -73,9 +77,15 @@ func T(_ key: String, _ args: [String: String] = [:]) -> String {
 func runMeet(_ args: [String], onLine: ((String) -> Void)? = nil,
              completion: @escaping (Int32, String) -> Void) {
     let p = Process()
-    p.executableURL = URL(fileURLWithPath: meetBin)
-    p.arguments = args
     var env = ProcessInfo.processInfo.environment
+    if let script = bundledScript, let py = findPython() {
+        p.executableURL = URL(fileURLWithPath: py)
+        p.arguments = [script] + args
+        env["MEETREC_CAPTURE"] = bundledCapture
+    } else {
+        p.executableURL = URL(fileURLWithPath: meetBin)
+        p.arguments = args
+    }
     env["PATH"] = "\(home)/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
     env["PYTHONUNBUFFERED"] = "1"
     p.environment = env
@@ -337,6 +347,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var recover: [[String: Any]] = []
     var settingsWindow: NSWindow?
     let settings = Settings()
+    let setup = SetupModel()
+    var setupWindow: NSWindow?
     let levels = LevelController()
     lazy var levelItem: NSMenuItem = {
         let i = NSMenuItem()
@@ -366,6 +378,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         loadRecover()
         // used to take README screenshots, and handy from a terminal: open -a MeetRec --args --settings
         let args = CommandLine.arguments
+        if !args.contains("--render-docs") {
+            setup.refresh { [weak self] in
+                if self?.setup.requiredMissing == true || args.contains("--setup") { self?.openSetup() }
+            }
+        }
         if args.contains("--settings") { openSettings() }
         if args.contains("--open-menu") {
             // pop the same menu at a fixed spot (works even when a menu bar manager hides the icon)
@@ -492,6 +509,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         menu.addItem(.separator())
         _ = add(T("settings"), #selector(openSettings), key: ",")
+        _ = add(T("setup_menu"), #selector(openSetup))
         _ = add("Log", #selector(openLog))
         _ = add(T("quit_meetrec"), #selector(quit), key: "q")
         loadRecover()
@@ -572,6 +590,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc func openLog() {
         appendLog("")
         NSWorkspace.shared.open(URL(fileURLWithPath: appLog))
+    }
+
+    @objc func openSetup() {
+        setup.onLogin = { [weak self] in self?.openSettings(); self?.settings.login() }
+        setup.refresh()
+        if setupWindow == nil {
+            let w = NSWindow(contentViewController: NSHostingController(rootView: SetupView(m: setup) { [weak self] in
+                self?.setupWindow?.close()
+            }))
+            w.title = "MeetRec – Setup"
+            w.styleMask = [.titled, .closable]
+            w.isReleasedWhenClosed = false
+            setupWindow = w
+        }
+        setupWindow?.center()
+        NSApp.activate(ignoringOtherApps: true)
+        setupWindow?.makeKeyAndOrderFront(nil)
     }
 
     @objc func openSettings() {

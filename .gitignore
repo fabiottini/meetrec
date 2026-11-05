@@ -1,7 +1,8 @@
+.claude/
 .venv/
 __pycache__/
 *.pyc
 capture/meetrec-capture
 *.s16
 .DS_Store
-.claude/
+dist/MeetRec.app/
