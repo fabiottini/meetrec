@@ -65,6 +65,37 @@ enum MicVolume {
         return ok
     }
 
+    // MARK: mute (input scope). Not every device has it: callers fall back to volume 0.
+
+    static func canMute(_ dev: AudioDeviceID) -> Bool {
+        var a = address(kAudioDevicePropertyMute, kAudioDevicePropertyScopeInput)
+        var settable: DarwinBoolean = false
+        return AudioObjectHasProperty(dev, &a) && AudioObjectIsPropertySettable(dev, &a, &settable) == noErr && settable.boolValue
+    }
+
+    static func isMuted(_ dev: AudioDeviceID) -> Bool? {
+        var a = address(kAudioDevicePropertyMute, kAudioDevicePropertyScopeInput)
+        guard AudioObjectHasProperty(dev, &a) else { return nil }
+        var v = UInt32(0)
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        return AudioObjectGetPropertyData(dev, &a, 0, nil, &size, &v) == noErr ? v != 0 : nil
+    }
+
+    @discardableResult
+    static func setMute(_ dev: AudioDeviceID, _ on: Bool) -> Bool {
+        var a = address(kAudioDevicePropertyMute, kAudioDevicePropertyScopeInput)
+        var v = UInt32(on ? 1 : 0)
+        return AudioObjectSetPropertyData(dev, &a, 0, nil, UInt32(MemoryLayout<UInt32>.size), &v) == noErr
+    }
+
+    static func uid(_ dev: AudioDeviceID) -> String? {
+        var a = address(kAudioDevicePropertyDeviceUID)
+        var uid: Unmanaged<CFString>?
+        var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        guard AudioObjectGetPropertyData(dev, &a, 0, nil, &size, &uid) == noErr, let u = uid else { return nil }
+        return u.takeRetainedValue() as String
+    }
+
     static func name(_ dev: AudioDeviceID) -> String {
         var a = address(kAudioObjectPropertyName)
         var name: Unmanaged<CFString>?

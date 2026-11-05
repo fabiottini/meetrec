@@ -346,6 +346,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var lastNote: String? = UserDefaults.standard.string(forKey: "lastNote")
     var recover: [[String: Any]] = []
     var settingsWindow: NSWindow?
+    var muteTick = 0
     let settings = Settings()
     let setup = SetupModel()
     var setupWindow: NSWindow?
@@ -369,11 +370,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         levels.config = {
             (try? JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: configFile)))) as? [String: Any] ?? [:]
         }
+        levels.onMute = { [weak self] in self?.toggleMute() }
         levels.saveConfig = { c in
             if let d = try? JSONSerialization.data(withJSONObject: c, options: [.prettyPrinted, .sortedKeys]) {
                 try? d.write(to: URL(fileURLWithPath: configFile), options: .atomic)
             }
         }
+        if !MicMute.shared.enabled { MicMute.shared.restoreAll() }
         refresh()
         loadRecover()
         // used to take README screenshots, and handy from a terminal: open -a MeetRec --args --settings
@@ -414,7 +417,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Menu bar glyph: rounded square with a waveform.
     /// idle/processing: template (follows light/dark menu bar), waveform cut out of a solid tile.
     /// recording: red tile with white bars that follow the real mic level; dead: orange.
-    func glyph(fill: NSColor?, level: Double?) -> NSImage {
+    func glyph(fill: NSColor?, level: Double?, muted: Bool = false) -> NSImage {
         let img = NSImage(size: NSSize(width: 19, height: 18), flipped: false) { _ in
             // rounded square ("mini app icon"): distinct from mic glyphs and round VPN/record dots
             let tile = NSBezierPath(roundedRect: NSRect(x: 1.5, y: 1, width: 16, height: 16), xRadius: 4.5, yRadius: 4.5)
@@ -441,6 +444,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 x += w + gap
             }
             NSGraphicsContext.current?.compositingOperation = .sourceOver
+            if muted {                     // mic muted: diagonal slash, with a cut-out border for contrast
+                let slash = NSBezierPath()
+                slash.move(to: NSPoint(x: 2.5, y: 16.5)); slash.line(to: NSPoint(x: 16.5, y: 1.5))
+                slash.lineCapStyle = .round
+                NSGraphicsContext.current?.compositingOperation = .destinationOut
+                slash.lineWidth = 4.2; NSColor.black.setStroke(); slash.stroke()
+                NSGraphicsContext.current?.compositingOperation = .sourceOver
+                slash.lineWidth = 1.7; (fill == nil ? NSColor.black : NSColor.white).setStroke(); slash.stroke()
+            }
             return true
         }
         img.isTemplate = (fill == nil)
@@ -448,17 +460,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return img
     }
 
+    func micUID() -> String? {
+        let c = (try? JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: configFile)))) as? [String: Any]
+        return c?["mic_id"] as? String
+    }
+
     func refresh() {
         guard let b = item.button else { return }
-        if let c = current() {
+        let cur = current()
+        muteTick += 1
+        if muteTick % 4 == 0 { MicMute.shared.tick(micUID: micUID()) }   // once a second
+        if let c = cur {
             let db = LevelController.readLevels(c.dir)["mic"]?.0 ?? -120
-            b.image = c.alive ? glyph(fill: .systemRed, level: db) : glyph(fill: .systemOrange, level: nil)
+            b.image = c.alive ? glyph(fill: .systemRed, level: db, muted: MicMute.shared.enabled)
+                              : glyph(fill: .systemOrange, level: nil)
             b.title = " " + elapsed(c.start)
         } else if processing {
             b.image = glyph(fill: nil, level: nil)
             b.title = " …"
         } else {
-            b.image = glyph(fill: nil, level: nil)
+            b.image = glyph(fill: nil, level: nil, muted: MicMute.shared.enabled)
             b.title = ""
         }
         b.imagePosition = .imageLeading
@@ -475,6 +496,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.removeAllItems()
         let cur = current()
         menu.addItem(levelItem)
+        let mi = NSMenuItem(title: T("mute_mic_menu"), action: #selector(toggleMute), keyEquivalent: "m")
+        mi.target = self
+        mi.state = MicMute.shared.enabled ? .on : .off
+        menu.addItem(mi)
         menu.addItem(.separator())
         func add(_ title: String, _ action: Selector?, key: String = "", enabled: Bool = true) -> NSMenuItem {
             let i = NSMenuItem(title: title, action: action, keyEquivalent: key)
@@ -489,6 +514,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else {
             if processing { _ = add(T("processing") + processingStep, nil) }
             _ = add(T("start_recording"), #selector(start), key: "r")
+
             _ = add(T("start_with_title"), #selector(startWithTitle))
         }
         menu.addItem(.separator())
@@ -532,6 +558,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let t = f.stringValue.trimmingCharacters(in: .whitespaces)
             startRecording(title: t.isEmpty ? nil : t)
         }
+    }
+
+    @objc func toggleMute() {
+        MicMute.shared.enabled.toggle()
+        MicMute.shared.tick(micUID: micUID())
+        refresh()
+    }
+
+    func applicationWillTerminate(_ n: Notification) {
+        MicMute.shared.restoreAll()          // never leave the mic muted without the app
     }
 
     func startRecording(title: String?) {
@@ -667,6 +703,7 @@ func renderDocs(_ dir: String, _ d: AppDelegate) {
     lv.setVolume(0.62)
     lv.agcBox.state = .on
     lv.agcBox.title = T("lower_automatically_when_clipping")
+    lv.setMuted(false, unsupported: false)
     let panel = NSView(frame: lv.frame)
     panel.appearance = dark
     panel.wantsLayer = true
@@ -678,6 +715,7 @@ func renderDocs(_ dir: String, _ d: AppDelegate) {
     // the whole menu: level panel + items, drawn like a dark macOS menu
     let rowH: CGFloat = 24, sepH: CGFloat = 11, pad: CGFloat = 6
     let rows: [(String, String)?] = [
+        (T("mute_mic_menu"), "⌘M"),
         nil,
         (T("start_recording"), "⌘R"), (T("start_with_title"), ""),
         nil,
@@ -695,6 +733,7 @@ func renderDocs(_ dir: String, _ d: AppDelegate) {
     let lv2 = LevelView()
     lv2.micName = lv.micName; lv2.history = lv.history; lv2.mic = lv.mic; lv2.sys = lv.sys
     lv2.setVolume(0.62); lv2.agcBox.state = .on; lv2.agcBox.title = lv.agcBox.title
+    lv2.setMuted(false, unsupported: false)
     lv2.frame.origin = NSPoint(x: 0, y: pad)
     menuView.addSubview(lv2)
     var y = lv2.frame.maxY

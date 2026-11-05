@@ -63,6 +63,11 @@ final class LevelView: NSView {
     let slider = NSSlider(value: 50, minValue: 0, maxValue: 100, target: nil, action: nil)
     let volLabel = NSTextField(labelWithString: "")
     let agcBox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    let muteButton = NSButton(title: "", target: nil, action: nil)
+    var muted = false
+    var recording = false
+    var muteUnsupported = false
+    var onMute: (() -> Void)?
     var onVolume: ((Float) -> Void)?
     var onAutoGain: ((Bool) -> Void)?
 
@@ -78,12 +83,27 @@ final class LevelView: NSView {
         agcBox.frame = NSRect(x: 14, y: 174, width: 300, height: 20)
         agcBox.font = .systemFont(ofSize: 12)
         agcBox.target = self; agcBox.action = #selector(agcToggled)
-        addSubview(slider); addSubview(volLabel); addSubview(agcBox)
+        muteButton.frame = NSRect(x: 226, y: 6, width: 92, height: 24)
+        muteButton.bezelStyle = .rounded
+        muteButton.font = .systemFont(ofSize: 12)
+        muteButton.imageHugsTitle = true
+        muteButton.imagePosition = .imageLeading
+        muteButton.target = self; muteButton.action = #selector(muteClicked)
+        addSubview(slider); addSubview(volLabel); addSubview(agcBox); addSubview(muteButton)
     }
     required init?(coder: NSCoder) { fatalError() }
 
     @objc func sliderMoved() { onVolume?(Float(slider.doubleValue / 100)) }
     @objc func agcToggled() { onAutoGain?(agcBox.state == .on) }
+    @objc func muteClicked() { onMute?() }
+
+    func setMuted(_ m: Bool, unsupported: Bool) {
+        muted = m; muteUnsupported = unsupported
+        muteButton.title = m ? T("unmute") : T("mute")
+        muteButton.image = NSImage(systemSymbolName: m ? "mic.slash.fill" : "mic.fill", accessibilityDescription: nil)
+        muteButton.contentTintColor = m ? .systemRed : nil
+        needsDisplay = true
+    }
 
     func push(mic m: (Double, Double), sys s: (Double, Double)?) {
         mic = (m.0, m.1); sys = s.map { ($0.0, $0.1) }
@@ -105,6 +125,10 @@ final class LevelView: NSView {
     }
 
     func status() -> (String, NSColor) {
+        if muted {
+            if muteUnsupported { return (T("mute_unsupported"), .systemOrange) }
+            return (recording ? T("recording_while_muted") : T("mic_muted_status"), .systemRed)
+        }
         if Date().timeIntervalSince(lastClip) < 2 { return (T("clipping_lower_the_volume"), .systemRed) }
         let loud = history.suffix(30).max() ?? -120
         if loud < -50 { return (T("silence_speak_to_test_the_level"), .secondaryLabelColor) }
@@ -143,8 +167,10 @@ final class LevelView: NSView {
 
     override func draw(_ dirty: NSRect) {
         let (txt, col) = status()
-        (T("microphone_2") + micName as NSString).draw(at: NSPoint(x: 16, y: 6),
-            withAttributes: [.font: NSFont.boldSystemFont(ofSize: 12), .foregroundColor: NSColor.labelColor])
+        // mic name: truncated so it never runs under the Mute button
+        let para = NSMutableParagraphStyle(); para.lineBreakMode = .byTruncatingTail
+        (T("microphone_2") + micName as NSString).draw(in: NSRect(x: 16, y: 6, width: muteButton.frame.minX - 24, height: 16),
+            withAttributes: [.font: NSFont.boldSystemFont(ofSize: 12), .foregroundColor: NSColor.labelColor, .paragraphStyle: para])
         (txt as NSString).draw(at: NSPoint(x: 16, y: 22), withAttributes: [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: col])
 
         // waveform of the mic, last ~9 s
@@ -179,6 +205,10 @@ final class LevelController {
     var currentDir: () -> String? = { nil }
     var config: () -> [String: Any] = { [:] }
     var saveConfig: ([String: Any]) -> Void = { _ in }
+    var onMute: (() -> Void)? {
+        get { view.onMute }
+        set { view.onMute = newValue }
+    }
 
     init() {
         view.onVolume = { [weak self] v in
@@ -202,6 +232,7 @@ final class LevelController {
         view.micName = dev.map(MicVolume.name) ?? "?"
         view.agcBox.title = T("lower_automatically_when_clipping")
         view.agcBox.state = autoOn ? .on : .off
+        view.setMuted(MicMute.shared.enabled, unsupported: MicMute.shared.unsupported)
         view.setVolume(dev.flatMap(MicVolume.get))
         view.history = []
         agc = AutoGain(uid: uid, enabled: autoOn)
@@ -238,6 +269,8 @@ final class LevelController {
             view.push(mic: (m.0, m.1), sys: nil)
         }
         view.setVolume(dev.flatMap(MicVolume.get))
+        view.recording = currentDir() != nil
+        view.setMuted(MicMute.shared.enabled, unsupported: MicMute.shared.unsupported)
     }
 
     static func readLevels(_ dir: String) -> [String: (Double, Double)] {

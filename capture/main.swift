@@ -127,6 +127,9 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
         try s.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
         if wantSystem { try s.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue) }
         if wantMic { try s.addStreamOutput(self, type: .microphone, sampleHandlerQueue: queue) }
+        if wantMic, let dev = MicVolume.deviceID(uid: micID), MicVolume.isMuted(dev) == true {
+            log("warning: mic '\(MicVolume.name(dev))' is muted, your voice will not be recorded until you unmute it")
+        }
         try await s.startCapture()
         stream = s
         startMeter()
