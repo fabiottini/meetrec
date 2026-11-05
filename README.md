@@ -2,187 +2,194 @@
 
 # meet-rec-transcribe
 
-Registra i meeting sul Mac (la tua voce + quella degli altri partecipanti), li trascrive
-**in locale** con [whisper.cpp](https://github.com/ggml-org/whisper.cpp), collega la registrazione
-all'evento del calendario Outlook e salva una nota in Obsidian, con riassunto opzionale.
+Records meetings on your Mac (your voice and the other participants' voices) and transcribes them
+**locally** with [whisper.cpp](https://github.com/ggml-org/whisper.cpp). It links each recording to
+the Outlook calendar event and saves a note in Obsidian, with an optional summary.
 
-<p align="center"><img src="docs/menubar.png" width="250" alt="Icona nella barra dei menu: pronta e in registrazione"></p>
+<p align="center"><img src="docs/menubar.png" width="250" alt="Menu bar icon: ready and recording"></p>
 
-Due modi di usarlo, che condividono lo stesso stato:
-- **MeetRec**, app nella barra dei menu;
-- **`meet`**, comando da terminale.
+There are two ways to use it, and they share the same state:
+- **MeetRec**, a menu bar app;
+- **`meet`**, a command line tool.
 
-## Perché
+## Why
 
-Nasce perché l'app [Vibe](https://github.com/thewh1teagle/vibe) a volte si blocca mentre salva una registrazione, e quando succede si perde tutto.
-Qui la registrazione è separata dalla trascrizione: l'audio va su disco mentre registri, quindi un
-crash non lo fa perdere.
+The [Vibe](https://github.com/thewh1teagle/vibe) app sometimes freezes while it saves a recording,
+and then the whole recording is lost. MeetRec keeps recording and transcription apart: audio goes
+to disk while you record, so a crash does not lose it.
 
-## Cosa fa
+## What it does
 
-- **Registra due tracce**: il tuo microfono e l'audio di sistema, cioè gli altri partecipanti su
-  Teams, Meet, Zoom o browser. Non serve un driver audio né collegarsi alla call.
-- **Livelli in tempo reale** nel menu: forma d'onda del microfono, misuratori per te e per gli
-  altri, volume d'ingresso regolabile.
-- **Riduzione automatica**: se il microfono va in saturazione, il volume d'ingresso scende da solo.
-- **Trascrizione locale** con whisper.cpp (large-v3-turbo) e filtro dei silenzi; l'audio non lascia il Mac.
-- **Chi parla**: le tue frasi e quelle degli altri sono separate grazie alle due tracce.
-- **Calendario Outlook**: titolo, invitati, agenda e link dell'evento in corso.
-- **Riassunto** opzionale con Claude (solo testo): sintesi, decisioni, action item, punti aperti.
-- **Nota Obsidian** con frontmatter, persone collegate e transcript con i tempi.
+- **Records two tracks**: your microphone and the system audio, that is the other participants on
+  Teams, Meet, Zoom or a browser. You do not need an audio driver, and MeetRec does not join the call.
+- **Live levels** in the menu: microphone waveform, meters for you and for the others, and the
+  input volume.
+- **Automatic gain reduction**: if the microphone clips, the input volume goes down by itself.
+- **Local transcription** with whisper.cpp (large-v3-turbo) and a silence filter. The audio stays on
+  your Mac.
+- **Who is speaking**: your words and the others' words are kept apart, thanks to the two tracks.
+- **Outlook calendar**: title, attendees, agenda and link of the current event.
+- **Summary** with Claude, optional and text only: key points, decisions, action items, open
+  questions.
+- **Obsidian note** with frontmatter, linked people and a timestamped transcript.
 
-## Screenshot
+## Screenshots
 
-| Menu | Impostazioni |
+| Menu | Settings |
 |---|---|
-| <img src="docs/menu.png" width="330" alt="Menu con livelli audio e comandi"> | <img src="docs/settings.png" width="330" alt="Finestra Impostazioni"> |
+| <img src="docs/menu.png" width="330" alt="Menu with audio levels and commands"> | <img src="docs/settings.png" width="330" alt="Settings window"> |
 
-In cima al menu c'è il pannello dei livelli:
-- **forma d'onda**: gli ultimi 9 secondi del microfono. Blu = ok, arancione = basso,
-  rosso = vicino alla saturazione;
-- **Tu / Altri**: livello medio (barra) e picco (tacca);
-- **stato**: "Basso: alza il volume", "Livello OK", "Satura: abbassa il volume";
-- **slider**: il volume d'ingresso del microfono in macOS, lo stesso di Impostazioni di
-  Sistema > Suono. Vale anche per Teams;
-- **Riduci automaticamente se satura**: abbassa il volume del 15% a ogni saturazione, al massimo
-  una volta ogni 2 secondi. Non lo alza mai da solo.
+The top of the menu shows the level panel:
+- **waveform**: the last 9 seconds of the microphone. Blue means OK, orange means low, red means
+  close to clipping;
+- **You / Others**: average level (bar) and peak (tick);
+- **status**: "Low: raise the mic volume", "Level OK", "Clipping: lower the volume";
+- **slider**: the microphone input volume in macOS, the same one as in System Settings > Sound.
+  It also applies to Teams;
+- **Lower automatically when clipping**: lowers the volume by 15% each time the mic clips, at most
+  once every 2 seconds. It never raises the volume.
 
-A menu aperto senza registrazione, il pannello ascolta il microfono: puoi regolarlo prima del meeting.
+When the menu is open and you are not recording, the panel listens to the microphone, so you can
+set the level before the meeting.
 
-## Installazione
+## Installation
 
-L'app già compilata è nel repo: [`dist/MeetRec.zip`](dist/MeetRec.zip) (Apple Silicon e Intel, macOS 15+).
+A prebuilt app is in the repo: [`dist/MeetRec.zip`](dist/MeetRec.zip) (Apple Silicon and Intel,
+macOS 15 or later).
 
-1. Scarica `dist/MeetRec.zip` da GitLab, scompattalo e sposta **MeetRec** in Applicazioni.
-2. Aprila. L'app non è firmata con un certificato Apple, quindi la prima volta macOS la blocca:
-   vai in **Impostazioni di Sistema > Privacy e sicurezza** e premi **Apri comunque**.
-   In alternativa, da terminale: `xattr -dr com.apple.quarantine /Applications/MeetRec.app`.
-3. Si apre il **Setup**, che controlla tutto e installa quello che manca:
+1. Download `dist/MeetRec.zip` from GitLab, unzip it and move **MeetRec** to Applications.
+2. Open it. The app is not signed with an Apple certificate, so macOS blocks it the first time.
+   Go to **System Settings > Privacy & Security** and click **Open Anyway**.
+   Or, from Terminal: `xattr -dr com.apple.quarantine /Applications/MeetRec.app`.
+3. The **Setup** window opens. It checks everything and installs what is missing:
 
-| Voce | Cosa fa il pulsante |
+| Item | What the button does |
 |---|---|
-| Homebrew | copia il comando di installazione e apre brew.sh |
-| Python 3, ffmpeg, whisper.cpp | `brew install …`, con il log visibile |
-| Modello di trascrizione | scarica whisper large-v3-turbo (1,6 GB) e il filtro dei silenzi; se c'è Vibe li copia da lì |
-| Permessi microfono e audio di sistema | li chiede a macOS (per l'audio di sistema poi va riaperta l'app) |
-| Vault Obsidian | scegli la cartella |
-| Calendario Outlook (opzionale) | login Microsoft, il codice è già negli appunti |
-| Claude Code (opzionale) | serve per il riassunto; senza, la nota ha solo il transcript |
-| Comando `meet` (opzionale) | installa `~/.local/bin/meet` che usa l'app |
+| Homebrew | copies the install command and opens brew.sh |
+| Python 3, ffmpeg, whisper.cpp | `brew install …`, with the log shown |
+| Transcription model | downloads whisper large-v3-turbo (1.6 GB) and the silence filter; if Vibe is installed, copies them from Vibe |
+| Microphone and system audio permissions | asks macOS (for system audio, reopen the app afterwards) |
+| Obsidian vault | choose the folder |
+| Outlook calendar (optional) | Microsoft login; the code is already in the clipboard |
+| Claude Code (optional) | needed for the summary; without it the note has only the transcript |
+| `meet` command (optional) | installs `~/.local/bin/meet`, which uses the app |
 
-Il Setup si riapre da solo finché manca qualcosa di necessario; poi lo trovi nel menu, **Setup…**.
-Le altre opzioni (cartelle, microfono, lingua, riassunto…) sono in **Impostazioni**.
+Setup opens again by itself while something required is missing. After that it is in the menu,
+under **Setup…**. The other options (folders, microphone, languages, summary…) are in **Settings**.
 
-> Se usi un gestore della barra dei menu (Ice, Bartender…), l'icona può finire nella zona nascosta:
-> trascinala fuori.
+> If you use a menu bar manager (Ice, Bartender…), the icon may end up in the hidden section.
+> Drag it out.
 
-### Compilare da sorgente
+### Build from source
 
-Servono le Xcode Command Line Tools (`swiftc`).
+You need the Xcode Command Line Tools (`swiftc`).
 
 ```sh
 git clone git@gitlab.com:fabiottini/meet-rec-transcribe.git
 cd meet-rec-transcribe
-./build.sh      # crea dist/MeetRec.app e dist/MeetRec.zip
-./install.sh    # build + copia in ~/Applications + avvio
+./build.sh      # creates dist/MeetRec.app and dist/MeetRec.zip
+./install.sh    # build + copy to ~/Applications + open
 ```
 
-Dopo una modifica, ricorda di committare anche `dist/MeetRec.zip`.
-Ogni nuova build ha una firma diversa: macOS chiede di nuovo i due permessi.
+After a change, commit `dist/MeetRec.zip` too.
+Each new build has a different signature, so macOS asks for the two permissions again.
 
-## Uso
+## Usage
 
-### Barra dei menu
-| Icona | Stato |
+### Menu bar
+| Icon | State |
 |---|---|
-| quadrato bianco con onda | pronto |
-| quadrato rosso + timer | sta registrando; le barre seguono la tua voce |
-| quadrato arancione | il registratore si è fermato: ferma per salvare |
-| quadrato bianco + `…` | sta trascrivendo |
+| white square with a waveform | ready |
+| red square + timer | recording; the bars follow your voice |
+| orange square | the recorder stopped: stop to save |
+| white square + `…` | transcribing |
 
-Il menu ha queste voci: livelli audio, avvia (anche con un titolo), ferma ed elabora, ferma senza
-elaborare, registrazioni da elaborare, apri l'ultima nota in Obsidian, cartella registrazioni, log,
-impostazioni.
+The menu has: audio levels, start (optionally with a title), stop and process, stop without
+processing, recordings to process, open the last note in Obsidian, recordings folder, log,
+settings, setup.
 
-### Terminale
+### Command line
 ```
-meet start [-t "titolo"]   # registra in background
+meet start [-t "title"]   # record in the background
 meet status
-meet stop                  # ferma, trascrive, cerca l'evento, scrive la nota
-meet rec                   # in primo piano, Ctrl-C per fermare
-meet recover               # registrazioni mai elaborate (crash, riavvio)
-meet process <cartella>    # rielabora una registrazione
+meet stop                 # stop, transcribe, find the event, write the note
+meet rec                  # in the foreground, Ctrl-C to stop
+meet recover              # recordings never processed (crash, reboot)
+meet process <folder>     # process a recording again
 meet login | logout | whoami
-meet events [YYYY-MM-DD]   # eventi del calendario di un giorno
-meet mics                  # microfoni disponibili
+meet events [YYYY-MM-DD]  # calendar events of a day
+meet mics                 # available microphones
 ```
 
-## Qualità della trascrizione: il microfono conta
+## Transcription quality: the microphone matters
 
-Le cuffie Bluetooth (AirPods, Sony WH-1000XM…), quando usi il loro microfono, passano al profilo
-"telefono": audio a 16 kHz, banda stretta, spesso molto basso. Whisper sbaglia molto di più.
+Bluetooth headphones (AirPods, Sony WH-1000XM…) switch to the "headset" profile when you use their
+microphone: 16 kHz, narrow band, often very quiet. Whisper makes many more mistakes.
 
-- Guarda il pannello dei livelli: il parlato deve stare nella zona blu, "Livello OK".
-- Se puoi, usa il **microfono del Mac** o uno USB (Impostazioni > Microfono), anche in Teams.
-  Le cuffie restano in alta qualità per l'ascolto.
-- Il volume d'ingresso di alcune cuffie Bluetooth non è regolabile da macOS: lo slider lo dice
-  ("non regolabile").
+- Check the level panel: speech should stay in the blue zone, "Level OK".
+- If you can, use the **Mac's microphone** or a USB one (Settings > Microphone), in Teams too.
+  Your headphones then keep high quality for listening.
+- Some Bluetooth headsets do not let macOS change their input volume. The slider then shows
+  "not adjustable".
 
-## Come funziona
+## How it works
 
-1. **Registrazione** (`capture/main.swift`, ScreenCaptureKit). Due tracce separate,
-   microfono e audio di sistema, scritte come PCM grezzo mentre registri. Le tracce restano
-   allineate perché i buchi vengono riempiti di silenzio. Se il microfono cambia formato a metà,
-   parte un nuovo segmento. Ogni 100 ms il registratore scrive i livelli nel file `levels` per
-   l'app e, se attiva, applica la riduzione automatica.
-2. **Audio**. Il grezzo diventa `mic.m4a`, `system.m4a` e `mix.m4a`. Il grezzo viene cancellato
-   solo se le durate degli m4a tornano. A fine elaborazione resta solo `mix.m4a`: le trascrizioni delle due
-   tracce sono salvate, quindi `meet process` può rifare la nota anche senza le tracce separate.
-3. **Trascrizione**. `whisper-cli` (whisper.cpp) in locale, una traccia alla volta, con i timestamp e il
-   filtro dei silenzi (circa 2 volte più veloce). Se whisper.cpp manca e c'è Vibe, usa `vibe serve`. Le tracce
-   distinguono chi parla: microfono = `me`, audio di sistema = `others_label`. Vengono scartati:
-   - il testo che whisper inventa sulle tracce mute (controllo sul volume);
-   - le frasi doppie che il microfono raccoglie dagli altoparlanti.
-4. **Calendario**. Microsoft Graph `calendarView`: sceglie l'evento che si sovrappone di più
-   alla registrazione.
-5. **Riassunto** (opzionale). `claude -p` riceve **solo il testo** della trascrizione.
-6. **Nota**. `<vault>/<meetings_dir>/YYYY-MM/YYYY-MM-DD - <titolo>.md` con frontmatter
-   (`type: meeting`, `context`, `summary`, `people`, `date`, orari, link alla registrazione e
-   all'evento). Gli invitati che hanno una nota `nome_cognome.md` in `people_dir` vengono collegati.
+1. **Recording** (`capture/main.swift`, ScreenCaptureKit). Two separate tracks, microphone and
+   system audio, written as raw PCM while you record. Gaps are filled with silence, so the tracks
+   stay aligned. If the microphone changes format midway, a new segment starts. Every 100 ms the
+   recorder writes the levels to a `levels` file for the app and, when it is on, applies automatic
+   gain reduction.
+2. **Audio**. The raw audio becomes `mic.m4a`, `system.m4a` and `mix.m4a`. The raw files are deleted
+   only if the m4a durations match. When processing ends, only `mix.m4a` is kept. The transcriptions
+   of the two tracks are saved, so `meet process` can rebuild the note without the separate tracks.
+3. **Transcription**. `whisper-cli` (whisper.cpp) runs locally, one track at a time, with timestamps
+   and the silence filter (about 2x faster). If whisper.cpp is missing and Vibe is installed, it
+   uses `vibe serve`. The tracks tell who is speaking: microphone = `me`, system audio =
+   `others_label`. It drops:
+   - text that whisper makes up on silent tracks (loudness check);
+   - duplicate sentences that the microphone picks up from the speakers.
+4. **Calendar**. Microsoft Graph `calendarView`: it picks the event that overlaps the recording
+   the most.
+5. **Summary** (optional). `claude -p` receives **only the text** of the transcript.
+6. **Note**. `<vault>/<meetings_dir>/YYYY-MM/YYYY-MM-DD - <title>.md` with frontmatter
+   (`type: meeting`, `context`, `summary`, `people`, `date`, times, links to the recording and
+   to the event). Attendees with a `firstname_lastname.md` note in `people_dir` are linked.
+   The note text is in Italian.
 
-## Configurazione
+## Configuration
 
-`~/.config/meetrec/config.json`, modificabile anche da Impostazioni. Esempio in
+`~/.config/meetrec/config.json`, also editable from Settings. Example in
 [`config.example.json`](config.example.json).
 
-| Chiave | Default | Note |
+| Key | Default | Notes |
 |---|---|---|
-| `vault` | — | obbligatoria |
-| `meetings_dir` | `Meetings` | relativa al vault |
-| `people_dir` | `People` | relativa al vault |
-| `context` | `work` | valore di `context:` nel frontmatter |
+| `vault` | — | required |
+| `meetings_dir` | `Meetings` | relative to the vault |
+| `people_dir` | `People` | relative to the vault |
+| `context` | `work` | value of `context:` in the frontmatter |
 | `recordings_dir` | `~/Recordings/meetings` | |
-| `language` | `it` | lingua passata a whisper |
-| `ui_language` | lingua di sistema | lingua di menu e messaggi dell'app (Impostazioni > Interfaccia), vedi [Lingue](#lingue) |
-| `me` / `others_label` | `Me` / `Altri` | etichette delle due tracce |
-| `mic_id` | `null` | `null` = microfono di sistema; gli ID con `meet mics` |
-| `auto_gain` | `true` | abbassa il volume del microfono quando satura |
+| `language` | `it` | language passed to whisper |
+| `ui_language` | system language | language of the app menus and messages (Settings > Interface), see [Languages](#languages) |
+| `me` / `others_label` | `Me` / `Altri` | labels of the two tracks |
+| `mic_id` | `null` | `null` = system microphone; IDs from `meet mics` |
+| `auto_gain` | `true` | lowers the microphone volume when it clips |
 | `summary` | `true` | |
-| `summary_cmd` | `["claude","-p","--model","sonnet"]` | il prompt arriva su stdin |
-| `keep_raw` | `false` | tiene anche il PCM grezzo |
-| `keep_tracks` | `false` | dopo l'elaborazione tiene anche `mic.m4a` e `system.m4a`; altrimenti resta solo `mix.m4a` |
-| `whisper_bin`, `whisper_model`, `vad_model` | trovati da soli | whisper.cpp e modelli (`~/Library/Application Support/MeetRec/models`) |
-| `whisper_threads` | `4` | thread per la trascrizione: tiene il Mac reattivo |
-| `ffmpeg`, `vibe_bin`, `vibe_model` | trovati da soli | Vibe solo come riserva |
-| `ms_client_id`, `ms_authority` | client pubblico, `organizations` | login device code, solo `Calendars.Read` |
+| `summary_cmd` | `["claude","-p","--model","sonnet"]` | the prompt is sent on stdin |
+| `keep_raw` | `false` | also keeps the raw PCM |
+| `keep_tracks` | `false` | also keeps `mic.m4a` and `system.m4a` after processing; otherwise only `mix.m4a` is kept |
+| `whisper_bin`, `whisper_model`, `vad_model` | found automatically | whisper.cpp and models (`~/Library/Application Support/MeetRec/models`) |
+| `whisper_threads` | `4` | transcription threads: keeps the Mac responsive |
+| `ffmpeg`, `vibe_bin`, `vibe_model` | found automatically | Vibe is only a fallback |
+| `ms_client_id`, `ms_authority` | public client, `organizations` | device code login, `Calendars.Read` only |
 | `timezone` | `Europe/Rome` | |
 
-Il token Microsoft è in `~/.config/meetrec/token.json` (permessi 0600). Il login usa solo la libreria standard di Python.
+The Microsoft token is in `~/.config/meetrec/token.json` (mode 0600). The login uses only the
+Python standard library.
 
-## Lingue
+## Languages
 
-I testi dell'app (menu, pannello livelli, impostazioni, avvisi, notifiche) sono in file JSON, uno
-per lingua: [`locales/it.json`](locales/it.json), [`locales/en.json`](locales/en.json).
+The app texts (menu, level panel, settings, alerts, notifications) are in JSON files, one per
+language: [`locales/it.json`](locales/it.json), [`locales/en.json`](locales/en.json).
 
 ```json
 {
@@ -192,36 +199,36 @@ per lingua: [`locales/it.json`](locales/it.json), [`locales/en.json`](locales/en
 }
 ```
 
-- `_language_name` è il nome che compare in Impostazioni > Interfaccia.
-- `{nome}` è un segnaposto che l'app riempie (per esempio `{code}`).
-- Se una chiave manca, l'app usa l'inglese.
+- `_language_name` is the name shown in Settings > Interface.
+- `{name}` is a placeholder that the app fills in (for example `{code}`).
+- If a key is missing, the app uses English.
 
-Per aggiungere una lingua o cambiare una frase **senza ricompilare**: metti il file in
-`~/.config/meetrec/locales/<codice>.json` (pulsante "Apri cartella traduzioni" nelle Impostazioni).
-Basta mettere le chiavi che vuoi cambiare: le altre restano quelle del file incluso nell'app.
-La lingua nuova compare nel menu a tendina alla prossima apertura delle Impostazioni.
-Per includerla nell'app, aggiungila a `locales/` e rilancia `./install.sh`.
+To add a language or change a sentence **without rebuilding**, put the file in
+`~/.config/meetrec/locales/<code>.json` (the "Open translations folder" button in Settings).
+Only the keys you want to change are needed; the others come from the file inside the app.
+The new language appears in the list the next time you open Settings.
+To ship it with the app, add it to `locales/` and run `./install.sh`.
 
-## Limiti noti
+## Known limits
 
-- Gli altri partecipanti sono tutti in una sola traccia: non vengono distinti tra loro.
-- Senza cuffie il microfono raccoglie anche gli altoparlanti. Le frasi doppie vengono filtrate,
-  ma con le cuffie la trascrizione viene più pulita.
-- L'app è firmata ad-hoc. Dopo ogni `./install.sh` macOS può chiedere di nuovo i permessi.
+- All the other participants share one track, so they are not told apart.
+- Without headphones the microphone also picks up the speakers. Duplicate sentences are filtered,
+  but with headphones the transcript is cleaner.
+- The app is ad-hoc signed, so after each new build macOS may ask for the permissions again.
 
-## Struttura
+## Layout
 
 ```
-dist/MeetRec.zip          app già compilata (universale), pronta da scaricare
-capture/main.swift        registratore (ScreenCaptureKit), livelli, riduzione automatica
-menubar/main.swift        app barra dei menu (AppKit + SwiftUI)
-menubar/Setup.swift       setup guidato: dipendenze, modelli, permessi, vault, login
-menubar/LevelPanel.swift  pannello livelli audio e anteprima del microfono
-shared/MicVolume.swift    volume d'ingresso del microfono (Core Audio), condiviso
+dist/MeetRec.zip          prebuilt app (universal), ready to download
+capture/main.swift        recorder (ScreenCaptureKit), levels, automatic gain reduction
+menubar/main.swift        menu bar app (AppKit + SwiftUI)
+menubar/Setup.swift       guided setup: dependencies, models, permissions, vault, login
+menubar/LevelPanel.swift  audio level panel and microphone preview
+shared/MicVolume.swift    microphone input volume (Core Audio), shared
 menubar/Info.plist
-meet.py                   registrazione, audio, trascrizione, calendario, nota (anche CLI `meet`)
-locales/                  testi dell'interfaccia, un JSON per lingua
-assets/                   icona (make-icon.swift genera il PNG, AppIcon.icns per l'app)
-docs/                     immagini del README (MeetRec --render-docs docs)
+meet.py                   recording, audio, transcription, calendar, note (also the `meet` CLI)
+locales/                  UI texts, one JSON file per language
+assets/                   icon (make-icon.swift draws the PNG, AppIcon.icns for the app)
+docs/                     README images (MeetRec --render-docs docs)
 build.sh, install.sh
 ```

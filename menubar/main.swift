@@ -331,7 +331,7 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         // a grouped Form scrolls and has no intrinsic height: give the window a real size
-        .frame(width: 560, height: 840)
+        .frame(width: 560, height: 1000)
         .padding(.bottom, 8)
     }
 }
@@ -615,7 +615,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let w = NSWindow(contentViewController: NSHostingController(rootView: SettingsView(s: settings)))
             w.title = "MeetRec – " + T("settings_2")
             w.styleMask = [.titled, .closable, .resizable]
-            w.setContentSize(NSSize(width: 560, height: 840))
+            w.setContentSize(NSSize(width: 560, height: 1000))
             w.isReleasedWhenClosed = false
             settingsWindow = w
         }
@@ -684,7 +684,7 @@ func renderDocs(_ dir: String, _ d: AppDelegate) {
         (T("open_last_note") + "2026-11-05 - Weekly.md", ""), (T("open_recordings_folder"), ""),
         (T("to_process") + " (1)", "›"),
         nil,
-        (T("settings"), "⌘,"), ("Log", ""), (T("quit_meetrec"), "⌘Q"),
+        (T("settings"), "⌘,"), (T("setup_menu"), ""), ("Log", ""), (T("quit_meetrec"), "⌘Q"),
     ]
     let itemsH = rows.reduce(CGFloat(0)) { $0 + ($1 == nil ? sepH : rowH) }
     let menuView = FlippedView(frame: NSRect(x: 0, y: 0, width: lv.frame.width, height: lv.frame.height + itemsH + pad * 2))
@@ -720,6 +720,23 @@ func renderDocs(_ dir: String, _ d: AppDelegate) {
         y += rowH
     }
     savePNG(menuView, dir + "/menu.png")
+
+    // settings window (demo config from MEETREC_CONFIG_FILE, demo account)
+    let st = Settings()
+    st.load()
+    st.account = "you@company.com"
+    st.mics = [("MacBook Pro Microphone", "BuiltInMicrophoneDevice")]
+    let host = NSHostingView(rootView: SettingsView(s: st))
+    host.frame = NSRect(x: 0, y: 0, width: 560, height: 1000)
+    host.appearance = dark
+    let win = NSWindow(contentRect: host.frame, styleMask: [.titled], backing: .buffered, defer: false)
+    win.appearance = dark
+    win.contentView = host
+    host.layoutSubtreeIfNeeded()
+    RunLoop.main.run(until: Date().addingTimeInterval(0.5))   // let SwiftUI lay out
+    st.account = "you@company.com"                           // whoami may have answered meanwhile
+    RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+    savePNG(host, dir + "/settings.png")
 
     // menu bar states
     let bar = NSView(frame: NSRect(x: 0, y: 0, width: 250, height: 28))
