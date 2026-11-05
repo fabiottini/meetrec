@@ -25,6 +25,7 @@ to disk while you record, so a crash does not lose it.
 - **Live levels** in the menu: microphone waveform, meters for you and for the others, and the
   input volume.
 - **Automatic gain reduction**: if the microphone clips, the input volume goes down by itself.
+- **Mute switch**: mutes the microphone for every app (Teams included) until you switch it off.
 - **Local transcription** with whisper.cpp (large-v3-turbo) and a silence filter. The audio stays on
   your Mac.
 - **Who is speaking**: your words and the others' words are kept apart, thanks to the two tracks.
@@ -51,6 +52,18 @@ The top of the menu shows the level panel:
 
 When the menu is open and you are not recording, the panel listens to the microphone, so you can
 set the level before the meeting.
+
+**Mute microphone** (menu item, ⌘M, or the Mute button in the panel) is a switch, off by default.
+When it is on:
+- the microphone is muted in macOS, so every app hears nothing;
+- it is forced: MeetRec checks every second and mutes it again if another app unmutes it, also
+  when you change the default input;
+- if the microphone has no mute control (some Bluetooth headsets), MeetRec sets its input volume
+  to 0 and restores the old volume afterwards;
+- the menu bar icon shows a slash;
+- if you record while muted, your voice is not recorded and the panel tells you.
+
+Switching it off, or quitting MeetRec, restores the microphone as it was.
 
 ## Installation
 
