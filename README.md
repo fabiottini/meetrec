@@ -127,7 +127,8 @@ Le cuffie Bluetooth (AirPods, Sony WH-1000XM…), quando usi il loro microfono, 
    parte un nuovo segmento. Ogni 100 ms il registratore scrive i livelli nel file `levels` per
    l'app e, se attiva, applica la riduzione automatica.
 2. **Audio**. Il grezzo diventa `mic.m4a`, `system.m4a` e `mix.m4a`. Il grezzo viene cancellato
-   solo se le durate degli m4a tornano.
+   solo se le durate degli m4a tornano. A fine elaborazione resta solo `mix.m4a`: le trascrizioni delle due
+   tracce sono salvate, quindi `meet process` può rifare la nota anche senza le tracce separate.
 3. **Trascrizione**. `vibe serve` in locale, una traccia alla volta, con i timestamp. Le tracce
    distinguono chi parla: microfono = `me`, audio di sistema = `others_label`. Vengono scartati:
    - il testo che whisper inventa sulle tracce mute (controllo sul volume);
@@ -159,6 +160,7 @@ Le cuffie Bluetooth (AirPods, Sony WH-1000XM…), quando usi il loro microfono, 
 | `summary` | `true` | |
 | `summary_cmd` | `["claude","-p","--model","sonnet"]` | il prompt arriva su stdin |
 | `keep_raw` | `false` | tiene anche il PCM grezzo |
+| `keep_tracks` | `false` | dopo l'elaborazione tiene anche `mic.m4a` e `system.m4a`; altrimenti resta solo `mix.m4a` |
 | `vibe_bin`, `vibe_model`, `ffmpeg` | path standard | |
 | `ms_client_id`, `ms_authority` | client pubblico, `organizations` | login device code, solo `Calendars.Read` |
 | `timezone` | `Europe/Rome` | |

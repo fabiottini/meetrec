@@ -52,6 +52,7 @@ DEFAULTS = {
     "summary": True,
     "summary_cmd": ["claude", "-p", "--model", "sonnet"],
     "keep_raw": False,
+    "keep_tracks": False,                              # keep mic.m4a/system.m4a after processing (mix.m4a is always kept)
     # Microsoft Graph (calendar). Same public client used by the ms365 MCP server.
     "ms_client_id": "084a3e9f-a9f4-43f7-89f9-d229cf97853e",
     "ms_authority": "https://login.microsoftonline.com/organizations",
@@ -60,7 +61,7 @@ DEFAULTS = {
 
 
 USER_KEYS = ["recordings_dir", "vault", "meetings_dir", "people_dir", "context", "language", "me",
-             "others_label", "mic_id", "auto_gain", "summary", "keep_raw"]
+             "others_label", "mic_id", "auto_gain", "summary", "keep_raw", "keep_tracks"]
 
 
 def load_conf():
@@ -291,9 +292,17 @@ def build_audio(d):
         elif not ok:
             say("WARNING: m4a duration mismatch, raw files kept")
     else:
-        for n in tracks:
-            if not (d / f"{n}.wav").exists() and (d / f"{n}.m4a").exists():
+        # re-processing: reuse saved transcriptions; decode audio only for what is missing
+        for n in ("mic", "system"):
+            if not (d / f"{n}.segments.json").exists() and not (d / f"{n}.wav").exists() and (d / f"{n}.m4a").exists():
                 ff("-i", str(d / f"{n}.m4a"), "-ar", "16000", "-ac", "1", str(d / f"{n}.wav"))
+        tracks = [n for n in ("mic", "system") if (d / f"{n}.segments.json").exists() or (d / f"{n}.wav").exists()]
+        if not tracks and (d / "mix.m4a").exists():
+            # only the mix is left: transcribe it as one track (speakers not separated)
+            if not (d / "mix.segments.json").exists() and not (d / "mix.wav").exists():
+                ff("-i", str(d / "mix.m4a"), "-ar", "16000", "-ac", "1", str(d / "mix.wav"))
+            tracks = ["mix"]
+        return tracks
     return [n for n in tracks if (d / f"{n}.wav").exists()]
 
 
@@ -313,6 +322,8 @@ def free_port():
 
 
 def transcribe(d, tracks, lang):
+    if all((d / f"{n}.segments.json").exists() for n in tracks):
+        return {n: read_json(d / f"{n}.segments.json") for n in tracks}
     port = free_port()
     srv = subprocess.Popen([C["vibe_bin"], "serve", "-p", str(port), "--exit-with-parent", "true", C["vibe_model"]],
                            stdout=open(d / "vibe-server.log", "ab"), stderr=subprocess.STDOUT)
@@ -379,8 +390,22 @@ def clean_segments(data, speaker, levels=None):
     return out
 
 
+def track_levels(d, n):
+    """per-second loudness of a track, cached in <track>.levels.json (survives deleting the audio)"""
+    cache = d / f"{n}.levels.json"
+    if cache.exists():
+        return read_json(cache)
+    if (d / f"{n}.wav").exists():
+        lv = loudness_per_second(d / f"{n}.wav")
+        write_json(cache, lv)
+        return lv
+    return None
+
+
 def merge(segs_by_track, levels):
     me, others = C["me"], C["others_label"]
+    if "mix" in segs_by_track:          # single mixed track: no speaker labels
+        return join_turns(sorted(clean_segments(segs_by_track["mix"], "", levels.get("mix")), key=lambda s: s["start"]))
     mic = clean_segments(segs_by_track.get("mic", {}), me, levels.get("mic"))
     system = clean_segments(segs_by_track.get("system", {}), others, levels.get("system"))
     # drop mic segments that are just the speakers bleeding into the mic (no headphones)
@@ -391,7 +416,10 @@ def merge(segs_by_track, levels):
                     for s in system)
         if not bleed:
             deduped.append(m)
-    segs = sorted(deduped + system, key=lambda s: s["start"])
+    return join_turns(sorted(deduped + system, key=lambda s: s["start"]))
+
+
+def join_turns(segs):
     turns = []
     for s in segs:
         if turns and turns[-1]["speaker"] == s["speaker"] and s["start"] - turns[-1]["end"] < 4:
@@ -667,9 +695,10 @@ def write_note(d, meta, event, turns, single_track, summary_line, summary_body):
     if summary_body:
         body += ["## Riassunto", "", "_Generato automaticamente dalla trascrizione: da verificare._", "",
                  summary_body, ""]
+    who = ("traccia unica, interlocutori non separati" if single_track else
+           f"**{C['me']}** = mio microfono, **{C['others_label']}** = audio degli altri partecipanti")
     body += ["## Trascrizione", "",
-             f"_Trascrizione automatica locale (Vibe, whisper large-v3-turbo). "
-             f"**{C['me']}** = mio microfono, **{C['others_label']}** = audio degli altri partecipanti._", "",
+             f"_Trascrizione automatica locale (Vibe, whisper large-v3-turbo); {who}._", "",
              transcript_md(turns, single_track) or "_(nessun parlato riconosciuto)_"]
     note.write_text("\n".join(fm) + "\n" + "\n".join(body) + "\n")
     return note
@@ -692,7 +721,7 @@ def process(d):
         say("no audio found")
         return 1
     segs = transcribe(d, tracks, meta.get("language") or C["language"])
-    levels = {n: loudness_per_second(d / f"{n}.wav") for n in tracks}
+    levels = {n: track_levels(d, n) for n in tracks}
     turns = merge(segs, levels)
     single = len(tracks) == 1
     (d / "transcript.md").write_text(transcript_md(turns, single))
@@ -712,6 +741,13 @@ def process(d):
     write_json(d / "meta.json", meta)
     for n in tracks:
         (d / f"{n}.wav").unlink(missing_ok=True)
+    # keep only the mix: transcriptions and levels are saved, so the note can be rebuilt without the tracks
+    if not C.get("keep_tracks", False) and probe_duration(d / "mix.m4a") > 0:
+        removed = [n for n in ("mic", "system") if (d / f"{n}.m4a").exists()]
+        for n in removed:
+            (d / f"{n}.m4a").unlink()
+        if removed:
+            say("separate tracks removed, mix.m4a kept")
     say(f"note: {note}")
     return 0
 

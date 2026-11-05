@@ -147,6 +147,7 @@ final class Settings: ObservableObject {
     @Published var micID = ""
     @Published var summary = true
     @Published var keepRaw = false
+    @Published var keepTracks = false
     @Published var mics: [(name: String, id: String)] = []
     @Published var account = "…"
     @Published var loginMessage = ""
@@ -170,6 +171,7 @@ final class Settings: ObservableObject {
         micID = raw["mic_id"] as? String ?? ""
         summary = raw["summary"] as? Bool ?? true
         keepRaw = raw["keep_raw"] as? Bool ?? false
+        keepTracks = raw["keep_tracks"] as? Bool ?? false
         launchAtLogin = SMAppService.mainApp.status == .enabled
         saved = false
         loadMics()
@@ -201,6 +203,7 @@ final class Settings: ObservableObject {
         raw["mic_id"] = micID.isEmpty ? NSNull() : micID
         raw["summary"] = summary
         raw["keep_raw"] = keepRaw
+        raw["keep_tracks"] = keepTracks
         if let d = try? JSONSerialization.data(withJSONObject: raw, options: [.prettyPrinted, .sortedKeys]) {
             try? FileManager.default.createDirectory(atPath: "\(home)/.config/meetrec", withIntermediateDirectories: true)
             try? d.write(to: URL(fileURLWithPath: configFile), options: .atomic)
@@ -282,6 +285,7 @@ struct SettingsView: View {
                     Text("Italiano").tag("it"); Text("English").tag("en")
                 }
                 Toggle(T("also_keep_raw_audio_much_more_space"), isOn: $s.keepRaw)
+                Toggle(T("keep_separate_tracks"), isOn: $s.keepTracks)
             }
             Section("Obsidian") {
                 PathField(label: "Vault", path: $s.vault)

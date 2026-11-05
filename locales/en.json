@@ -12,6 +12,7 @@
   "if_it_is_a_permission_problem_enable": "If it is a permission problem, enable MeetRec in Privacy > Microphone and Screen & System Audio Recording, then restart MeetRec.",
   "if_you_quit_the_recording_keeps_going": "If you quit, the recording keeps going in the background. Stop it by reopening MeetRec or with `meet stop`.",
   "interface": "Interface",
+  "keep_separate_tracks": "Also keep the separate tracks (besides the mix)",
   "launch_at_login": "Launch at login: ",
   "leave_empty_to_use_the_calendar_event": "Leave empty to use the calendar event title.",
   "level_ok": "Level OK",
