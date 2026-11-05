@@ -35,6 +35,7 @@ swiftc -O -o "$BUILD/MeetRec.app/Contents/MacOS/MeetRec" menubar/main.swift menu
 cp menubar/Info.plist "$BUILD/MeetRec.app/Contents/Info.plist"
 mkdir -p "$BUILD/MeetRec.app/Contents/Resources"
 cp assets/AppIcon.icns "$BUILD/MeetRec.app/Contents/Resources/AppIcon.icns"
+cp -R locales "$BUILD/MeetRec.app/Contents/Resources/locales"
 codesign --force --sign - "$BUILD/MeetRec.app"
 pkill -x MeetRec 2>/dev/null || true
 mkdir -p "$HOME/Applications"

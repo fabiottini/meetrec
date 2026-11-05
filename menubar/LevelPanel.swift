@@ -100,17 +100,17 @@ final class LevelView: NSView {
             volLabel.stringValue = "Volume \(Int((v * 100).rounded()))%"
         } else {
             slider.isEnabled = false
-            volLabel.stringValue = L("non regolabile", "not adjustable")
+            volLabel.stringValue = T("not_adjustable")
         }
     }
 
     func status() -> (String, NSColor) {
-        if Date().timeIntervalSince(lastClip) < 2 { return (L("Satura: abbassa il volume", "Clipping: lower the volume"), .systemRed) }
+        if Date().timeIntervalSince(lastClip) < 2 { return (T("clipping_lower_the_volume"), .systemRed) }
         let loud = history.suffix(30).max() ?? -120
-        if loud < -50 { return (L("Silenzio: parla per provare il livello", "Silence: speak to test the level"), .secondaryLabelColor) }
-        if loud < -32 { return (L("Basso: alza il volume del microfono", "Low: raise the mic volume"), .systemOrange) }
-        if loud > -8 { return (L("Alto: vicino alla saturazione", "High: close to clipping"), .systemOrange) }
-        return (L("Livello OK", "Level OK"), .systemGreen)
+        if loud < -50 { return (T("silence_speak_to_test_the_level"), .secondaryLabelColor) }
+        if loud < -32 { return (T("low_raise_the_mic_volume"), .systemOrange) }
+        if loud > -8 { return (T("high_close_to_clipping"), .systemOrange) }
+        return (T("level_ok"), .systemGreen)
     }
 
     static func frac(_ db: Double) -> CGFloat { CGFloat(max(0, min(1, (db + 60) / 60))) }
@@ -122,7 +122,7 @@ final class LevelView: NSView {
         NSColor.quaternaryLabelColor.setFill()
         NSBezierPath(roundedRect: r, xRadius: 3, yRadius: 3).fill()
         guard let v else {
-            (L("solo durante la registrazione", "only while recording") as NSString).draw(at: NSPoint(x: 66, y: y - 2),
+            (T("only_while_recording") as NSString).draw(at: NSPoint(x: 66, y: y - 2),
                 withAttributes: [.font: NSFont.systemFont(ofSize: 10), .foregroundColor: NSColor.tertiaryLabelColor])
             return
         }
@@ -143,7 +143,7 @@ final class LevelView: NSView {
 
     override func draw(_ dirty: NSRect) {
         let (txt, col) = status()
-        (L("Microfono: ", "Microphone: ") + micName as NSString).draw(at: NSPoint(x: 16, y: 6),
+        (T("microphone_2") + micName as NSString).draw(at: NSPoint(x: 16, y: 6),
             withAttributes: [.font: NSFont.boldSystemFont(ofSize: 12), .foregroundColor: NSColor.labelColor])
         (txt as NSString).draw(at: NSPoint(x: 16, y: 22), withAttributes: [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: col])
 
@@ -160,8 +160,8 @@ final class LevelView: NSView {
             NSRect(x: x, y: wave.midY - h / 2, width: max(1, bw - 1), height: h).fill()
         }
 
-        meter(L("Tu", "You"), mic, y: 92)
-        meter(L("Altri", "Others"), sys, y: 110)
+        meter(T("you"), mic, y: 92)
+        meter(T("others"), sys, y: 110)
         if !note.isEmpty {
             (note as NSString).draw(at: NSPoint(x: 16, y: 126),
                 withAttributes: [.font: NSFont.systemFont(ofSize: 10), .foregroundColor: NSColor.tertiaryLabelColor])
@@ -200,18 +200,18 @@ final class LevelController {
         let dev = MicVolume.deviceID(uid: uid)
         let autoOn = config()["auto_gain"] as? Bool ?? true
         view.micName = dev.map(MicVolume.name) ?? "?"
-        view.agcBox.title = L("Riduci automaticamente se satura", "Lower automatically when clipping")
+        view.agcBox.title = T("lower_automatically_when_clipping")
         view.agcBox.state = autoOn ? .on : .off
         view.setVolume(dev.flatMap(MicVolume.get))
         view.history = []
         agc = AutoGain(uid: uid, enabled: autoOn)
         if currentDir() == nil {
             let go = { self.previewing = self.preview.start(uid: uid)
-                       self.view.note = self.previewing ? L("Anteprima: il microfono è in ascolto finché il menu è aperto.", "Preview: the mic is listening while the menu is open.") : L("Anteprima microfono non disponibile (permesso?)", "Mic preview not available (permission?)") }
+                       self.view.note = self.previewing ? T("preview_the_mic_is_listening_while_the") : T("mic_preview_not_available_permission") }
             switch AVCaptureDevice.authorizationStatus(for: .audio) {
             case .authorized: go()
             case .notDetermined: AVCaptureDevice.requestAccess(for: .audio) { ok in DispatchQueue.main.async { if ok { go() } } }
-            default: view.note = L("Permesso microfono negato a MeetRec (Impostazioni > Privacy).", "Microphone permission denied to MeetRec (Settings > Privacy).")
+            default: view.note = T("microphone_permission_denied_to_meetrec_settings_privacy")
             }
         } else {
             view.note = ""
