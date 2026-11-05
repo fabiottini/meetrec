@@ -1,0 +1,13 @@
+{
+  "vault": "/Users/you/Obsidian/MyVault",
+  "meetings_dir": "Meetings",
+  "people_dir": "People",
+  "context": "work",
+  "recordings_dir": "/Users/you/Recordings/meetings",
+  "language": "it",
+  "me": "Me",
+  "others_label": "Altri",
+  "mic_id": null,
+  "summary": true,
+  "keep_raw": false
+}
