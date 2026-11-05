@@ -11,6 +11,17 @@ let stateFile = "\(home)/.local/state/meetrec/current.json"
 let configFile = ProcessInfo.processInfo.environment["MEETREC_CONFIG_FILE"] ?? "\(home)/.config/meetrec/config.json"
 let appLog = "\(home)/.local/state/meetrec/app.log"
 
+// MARK: - UI language ("ui_language" in config.json: "it" | "en"; default from the system language)
+
+var uiLang: String = {
+    let c = (try? JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: configFile)))) as? [String: Any]
+    if let l = c?["ui_language"] as? String { return l }
+    return (Locale.preferredLanguages.first ?? "en").hasPrefix("it") ? "it" : "en"
+}()
+
+/// Localized string: L("italiano", "english")
+func L(_ it: String, _ en: String) -> String { uiLang == "it" ? it : en }
+
 // MARK: - process helper
 
 func runMeet(_ args: [String], onLine: ((String) -> Void)? = nil,
@@ -85,6 +96,7 @@ final class Settings: ObservableObject {
     @Published var peopleDir = ""
     @Published var context = ""
     @Published var language = "it"
+    @Published var uiLanguage = uiLang { didSet { uiLang = uiLanguage } }   // switches the UI at once
     @Published var micID = ""
     @Published var summary = true
     @Published var keepRaw = false
@@ -105,6 +117,7 @@ final class Settings: ObservableObject {
         peopleDir = raw["people_dir"] as? String ?? ""
         context = raw["context"] as? String ?? "work"
         language = raw["language"] as? String ?? "it"
+        uiLanguage = uiLang
         micID = raw["mic_id"] as? String ?? ""
         summary = raw["summary"] as? Bool ?? true
         keepRaw = raw["keep_raw"] as? Bool ?? false
@@ -135,6 +148,7 @@ final class Settings: ObservableObject {
         raw["people_dir"] = peopleDir
         raw["context"] = context
         raw["language"] = language
+        raw["ui_language"] = uiLanguage
         raw["mic_id"] = micID.isEmpty ? NSNull() : micID
         raw["summary"] = summary
         raw["keep_raw"] = keepRaw
@@ -148,13 +162,13 @@ final class Settings: ObservableObject {
     func setLaunchAtLogin(_ on: Bool) {
         do {
             if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
-        } catch { loginMessage = "Avvio al login: \(error.localizedDescription)" }
+        } catch { loginMessage = L("Avvio al login: ", "Launch at login: ") + error.localizedDescription }
         launchAtLogin = SMAppService.mainApp.status == .enabled
     }
 
     func login() {
         loggingIn = true
-        loginMessage = "Avvio login Microsoft…"
+        loginMessage = L("Avvio login Microsoft…", "Starting Microsoft login…")
         runMeet(["login"], onLine: { line in
             // MSAL: "To sign in, use a web browser to open the page https://... and enter the code XXXX to authenticate."
             if let urlR = line.range(of: #"https://\S+"#, options: .regularExpression),
@@ -163,13 +177,13 @@ final class Settings: ObservableObject {
                 let code = String(line[codeR].dropFirst(5))
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(code, forType: .string)
-                self.loginMessage = "Codice \(code) copiato negli appunti: incollalo nella pagina che si è aperta nel browser."
+                self.loginMessage = L("Codice \(code) copiato negli appunti: incollalo nella pagina che si è aperta nel browser.", "Code \(code) copied to the clipboard: paste it in the page that opened in your browser.")
                 if let u = URL(string: url) { NSWorkspace.shared.open(u) }
             }
         }) { status, out in
             self.loggingIn = false
-            self.loginMessage = status == 0 ? "Login riuscito." :
-                "Login non riuscito: " + (out.split(separator: "\n").last.map(String.init) ?? "")
+            self.loginMessage = status == 0 ? L("Login riuscito.", "Logged in.") :
+                L("Login non riuscito: ", "Login failed: ") + (out.split(separator: "\n").last.map(String.init) ?? "")
             self.refreshAccount()
         }
     }
@@ -185,7 +199,7 @@ struct PathField: View {
     var body: some View {
         HStack {
             TextField(label, text: $path)
-            Button("Scegli…") {
+            Button(L("Scegli…", "Choose…")) {
                 let p = NSOpenPanel()
                 p.canChooseDirectories = true; p.canChooseFiles = false; p.canCreateDirectories = true
                 p.directoryURL = URL(fileURLWithPath: path)
@@ -200,47 +214,52 @@ struct SettingsView: View {
     @ObservedObject var s: Settings
     var body: some View {
         Form {
-            Section("Registrazioni") {
-                PathField(label: "Cartella audio", path: $s.recordingsDir)
-                Picker("Microfono", selection: $s.micID) {
-                    Text("Predefinito di sistema").tag("")
-                    ForEach(s.mics, id: \.id) { m in Text(m.name).tag(m.id) }
-                }
-                Picker("Lingua", selection: $s.language) {
+            Section(L("Interfaccia", "Interface")) {
+                Picker(L("Lingua di menu e messaggi", "Menu and messages language"), selection: $s.uiLanguage) {
                     Text("Italiano").tag("it"); Text("English").tag("en")
                 }
-                Toggle("Tieni anche l'audio grezzo (molto più spazio)", isOn: $s.keepRaw)
+            }
+            Section(L("Registrazioni", "Recordings")) {
+                PathField(label: L("Cartella audio", "Audio folder"), path: $s.recordingsDir)
+                Picker(L("Microfono", "Microphone"), selection: $s.micID) {
+                    Text(L("Predefinito di sistema", "System default")).tag("")
+                    ForEach(s.mics, id: \.id) { m in Text(m.name).tag(m.id) }
+                }
+                Picker(L("Lingua del meeting (trascrizione)", "Meeting language (transcription)"), selection: $s.language) {
+                    Text("Italiano").tag("it"); Text("English").tag("en")
+                }
+                Toggle(L("Tieni anche l'audio grezzo (molto più spazio)", "Also keep raw audio (much more space)"), isOn: $s.keepRaw)
             }
             Section("Obsidian") {
                 PathField(label: "Vault", path: $s.vault)
-                TextField("Cartella meeting (relativa al vault)", text: $s.meetingsDir)
-                TextField("Cartella persone (relativa al vault)", text: $s.peopleDir)
-                TextField("context nel frontmatter", text: $s.context)
-                Toggle("Riassunto automatico con Claude (solo testo)", isOn: $s.summary)
+                TextField(L("Cartella meeting (relativa al vault)", "Meetings folder (relative to vault)"), text: $s.meetingsDir)
+                TextField(L("Cartella persone (relativa al vault)", "People folder (relative to vault)"), text: $s.peopleDir)
+                TextField(L("context nel frontmatter", "frontmatter context"), text: $s.context)
+                Toggle(L("Riassunto automatico con Claude (solo testo)", "Automatic summary with Claude (text only)"), isOn: $s.summary)
             }
-            Section("Calendario Outlook") {
+            Section(L("Calendario Outlook", "Outlook calendar")) {
                 LabeledContent("Account", value: s.account)
                 HStack {
-                    Button(s.loggingIn ? "In attesa del browser…" : "Login Microsoft") { s.login() }.disabled(s.loggingIn)
+                    Button(s.loggingIn ? L("In attesa del browser…", "Waiting for the browser…") : L("Login Microsoft", "Microsoft login")) { s.login() }.disabled(s.loggingIn)
                     Button("Logout") { s.logout() }
                 }
                 if !s.loginMessage.isEmpty { Text(s.loginMessage).font(.callout).textSelection(.enabled) }
             }
-            Section("Sistema") {
-                Toggle("Avvia MeetRec al login", isOn: Binding(get: { s.launchAtLogin }, set: { s.setLaunchAtLogin($0) }))
+            Section(L("Sistema", "System")) {
+                Toggle(L("Avvia MeetRec al login", "Open MeetRec at login"), isOn: Binding(get: { s.launchAtLogin }, set: { s.setLaunchAtLogin($0) }))
                 HStack {
-                    Button("Permesso microfono") {
+                    Button(L("Permesso microfono", "Microphone permission")) {
                         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!)
                     }
-                    Button("Permesso audio di sistema") {
+                    Button(L("Permesso audio di sistema", "System audio permission")) {
                         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
                     }
                 }
             }
             HStack {
                 Spacer()
-                if s.saved { Text("Salvato").foregroundStyle(.secondary) }
-                Button("Salva") { s.save() }.keyboardShortcut("s").buttonStyle(.borderedProminent)
+                if s.saved { Text(L("Salvato", "Saved")).foregroundStyle(.secondary) }
+                Button(L("Salva", "Save")) { s.save() }.keyboardShortcut("s").buttonStyle(.borderedProminent)
             }
         }
         .formStyle(.grouped)
@@ -390,19 +409,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         if let c = cur {
             let t = c.title.map { " – \($0)" } ?? ""
-            _ = add(c.alive ? "● In registrazione da \(elapsed(c.start))\(t)" : "⚠︎ Il registratore si è fermato: ferma per salvare", nil)
-            _ = add("Ferma ed elabora", #selector(stopAndProcess), key: "s")
-            _ = add("Ferma senza elaborare", #selector(stopOnly))
+            _ = add(c.alive ? L("● In registrazione da ", "● Recording for ") + elapsed(c.start) + t : L("⚠︎ Il registratore si è fermato: ferma per salvare", "⚠︎ The recorder stopped: stop to save"), nil)
+            _ = add(L("Ferma ed elabora", "Stop and process"), #selector(stopAndProcess), key: "s")
+            _ = add(L("Ferma senza elaborare", "Stop without processing"), #selector(stopOnly))
         } else {
-            if processing { _ = add("Elaborazione: \(processingStep)", nil) }
-            _ = add("Avvia registrazione", #selector(start), key: "r")
-            _ = add("Avvia con titolo…", #selector(startWithTitle))
+            if processing { _ = add(L("Elaborazione: ", "Processing: ") + processingStep, nil) }
+            _ = add(L("Avvia registrazione", "Start recording"), #selector(start), key: "r")
+            _ = add(L("Avvia con titolo…", "Start with title…"), #selector(startWithTitle))
         }
         menu.addItem(.separator())
         if let n = lastNote {
-            _ = add("Apri ultima nota: \((n as NSString).lastPathComponent)", #selector(openLastNote))
+            _ = add(L("Apri ultima nota: ", "Open last note: ") + (n as NSString).lastPathComponent, #selector(openLastNote))
         }
-        _ = add("Apri cartella registrazioni", #selector(openRecordings))
+        _ = add(L("Apri cartella registrazioni", "Open recordings folder"), #selector(openRecordings))
         if !recover.isEmpty {
             let sub = NSMenu()
             for r in recover {
@@ -411,13 +430,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 i.target = self; i.representedObject = r["dir"]
                 sub.addItem(i)
             }
-            let m = add("Da elaborare (\(recover.count))", nil)
+            let m = add(L("Da elaborare", "To process") + " (\(recover.count))", nil)
             m.isEnabled = true; m.submenu = sub
         }
         menu.addItem(.separator())
-        _ = add("Impostazioni…", #selector(openSettings), key: ",")
+        _ = add(L("Impostazioni…", "Settings…"), #selector(openSettings), key: ",")
         _ = add("Log", #selector(openLog))
-        _ = add("Esci da MeetRec", #selector(quit), key: "q")
+        _ = add(L("Esci da MeetRec", "Quit MeetRec"), #selector(quit), key: "q")
         loadRecover()
     }
 
@@ -427,11 +446,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc func startWithTitle() {
         let a = NSAlert()
-        a.messageText = "Titolo del meeting"
-        a.informativeText = "Lascia vuoto per usare il titolo dell'evento in calendario."
+        a.messageText = L("Titolo del meeting", "Meeting title")
+        a.informativeText = L("Lascia vuoto per usare il titolo dell'evento in calendario.", "Leave empty to use the calendar event title.")
         let f = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
         a.accessoryView = f
-        a.addButton(withTitle: "Registra"); a.addButton(withTitle: "Annulla")
+        a.addButton(withTitle: L("Registra", "Record")); a.addButton(withTitle: L("Annulla", "Cancel"))
         NSApp.activate(ignoringOtherApps: true)
         a.window.initialFirstResponder = f
         if a.runModal() == .alertFirstButtonReturn {
@@ -447,9 +466,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self.refresh()
             if status != 0 {
                 let a = NSAlert()
-                a.messageText = "La registrazione non è partita"
-                a.informativeText = out.suffix(800) + "\n\nSe è un problema di permessi, abilita MeetRec in Privacy > Microfono e Registrazione schermo e audio di sistema, poi riavvia MeetRec."
-                a.addButton(withTitle: "OK"); a.addButton(withTitle: "Apri Privacy")
+                a.messageText = L("La registrazione non è partita", "Recording did not start")
+                a.informativeText = out.suffix(800) + "\n\n" + L("Se è un problema di permessi, abilita MeetRec in Privacy > Microfono e Registrazione schermo e audio di sistema, poi riavvia MeetRec.", "If it is a permission problem, enable MeetRec in Privacy > Microphone and Screen & System Audio Recording, then restart MeetRec.")
+                a.addButton(withTitle: "OK"); a.addButton(withTitle: L("Apri Privacy", "Open Privacy"))
                 NSApp.activate(ignoringOtherApps: true)
                 if a.runModal() == .alertSecondButtonReturn {
                     NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
@@ -466,7 +485,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func runPipeline(_ args: [String]) {
         processing = true
-        processingStep = "avvio"
+        processingStep = L("avvio", "starting")
         refresh()
         var note: String?
         runMeet(args, onLine: { line in
@@ -480,9 +499,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if status == 0, let n = note {
                 self.lastNote = n
                 UserDefaults.standard.set(n, forKey: "lastNote")
-                notify("Meeting salvato", (n as NSString).lastPathComponent)
+                notify(L("Meeting salvato", "Meeting saved"), (n as NSString).lastPathComponent)
             } else {
-                notify("Elaborazione non riuscita", "L'audio è salvo. Dettagli in Log, riprova da \"Da elaborare\".")
+                notify(L("Elaborazione non riuscita", "Processing failed"), L("L'audio è salvo. Dettagli in Log, riprova da \"Da elaborare\".", "The audio is safe. Details in Log, retry from \"To process\"."))
             }
         }
     }
@@ -502,7 +521,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settings.load()
         if settingsWindow == nil {
             let w = NSWindow(contentViewController: NSHostingController(rootView: SettingsView(s: settings)))
-            w.title = "MeetRec – Impostazioni"
+            w.title = "MeetRec – " + L("Impostazioni", "Settings")
             w.styleMask = [.titled, .closable, .resizable]
             w.setContentSize(NSSize(width: 560, height: 840))
             w.isReleasedWhenClosed = false
@@ -516,9 +535,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc func quit() {
         if let c = current(), c.alive {
             let a = NSAlert()
-            a.messageText = "C'è una registrazione in corso"
-            a.informativeText = "Se esci, la registrazione continua lo stesso in background. Potrai fermarla riaprendo MeetRec o con `meet stop`."
-            a.addButton(withTitle: "Esci"); a.addButton(withTitle: "Annulla")
+            a.messageText = L("C'è una registrazione in corso", "A recording is in progress")
+            a.informativeText = L("Se esci, la registrazione continua lo stesso in background. Potrai fermarla riaprendo MeetRec o con `meet stop`.", "If you quit, the recording keeps going in the background. Stop it by reopening MeetRec or with `meet stop`.")
+            a.addButton(withTitle: L("Esci", "Quit")); a.addButton(withTitle: L("Annulla", "Cancel"))
             NSApp.activate(ignoringOtherApps: true)
             if a.runModal() != .alertFirstButtonReturn { return }
         }
@@ -553,6 +572,7 @@ func renderDocs(_ dir: String, _ d: AppDelegate) {
     lv.sys = (-25, -11)
     lv.setVolume(0.62)
     lv.agcBox.state = .on
+    lv.agcBox.title = L("Riduci automaticamente se satura", "Lower automatically when clipping")
     let panel = NSView(frame: lv.frame)
     panel.appearance = dark
     panel.wantsLayer = true
@@ -568,8 +588,8 @@ func renderDocs(_ dir: String, _ d: AppDelegate) {
     bar.layer?.backgroundColor = NSColor(white: 0.12, alpha: 1).cgColor
     let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.menuBarFont(ofSize: 0), .foregroundColor: NSColor.white]
     let states: [(NSImage, String, String)] = [
-        (d.glyph(fill: nil, level: nil), "", "pronto"),
-        (d.glyph(fill: .systemRed, level: -20), " 12:34", "registra"),
+        (d.glyph(fill: nil, level: nil), "", L("pronto", "ready")),
+        (d.glyph(fill: .systemRed, level: -20), " 12:34", L("registra", "recording")),
     ]
     var x: CGFloat = 10
     for (img, title, caption) in states {

@@ -62,7 +62,7 @@ final class LevelView: NSView {
 
     let slider = NSSlider(value: 50, minValue: 0, maxValue: 100, target: nil, action: nil)
     let volLabel = NSTextField(labelWithString: "")
-    let agcBox = NSButton(checkboxWithTitle: "Riduci automaticamente se satura", target: nil, action: nil)
+    let agcBox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     var onVolume: ((Float) -> Void)?
     var onAutoGain: ((Bool) -> Void)?
 
@@ -100,17 +100,17 @@ final class LevelView: NSView {
             volLabel.stringValue = "Volume \(Int((v * 100).rounded()))%"
         } else {
             slider.isEnabled = false
-            volLabel.stringValue = "non regolabile"
+            volLabel.stringValue = L("non regolabile", "not adjustable")
         }
     }
 
     func status() -> (String, NSColor) {
-        if Date().timeIntervalSince(lastClip) < 2 { return ("Satura: abbassa il volume", .systemRed) }
+        if Date().timeIntervalSince(lastClip) < 2 { return (L("Satura: abbassa il volume", "Clipping: lower the volume"), .systemRed) }
         let loud = history.suffix(30).max() ?? -120
-        if loud < -50 { return ("Silenzio: parla per provare il livello", .secondaryLabelColor) }
-        if loud < -32 { return ("Basso: alza il volume del microfono", .systemOrange) }
-        if loud > -8 { return ("Alto: vicino alla saturazione", .systemOrange) }
-        return ("Livello OK", .systemGreen)
+        if loud < -50 { return (L("Silenzio: parla per provare il livello", "Silence: speak to test the level"), .secondaryLabelColor) }
+        if loud < -32 { return (L("Basso: alza il volume del microfono", "Low: raise the mic volume"), .systemOrange) }
+        if loud > -8 { return (L("Alto: vicino alla saturazione", "High: close to clipping"), .systemOrange) }
+        return (L("Livello OK", "Level OK"), .systemGreen)
     }
 
     static func frac(_ db: Double) -> CGFloat { CGFloat(max(0, min(1, (db + 60) / 60))) }
@@ -122,7 +122,7 @@ final class LevelView: NSView {
         NSColor.quaternaryLabelColor.setFill()
         NSBezierPath(roundedRect: r, xRadius: 3, yRadius: 3).fill()
         guard let v else {
-            ("solo durante la registrazione" as NSString).draw(at: NSPoint(x: 66, y: y - 2),
+            (L("solo durante la registrazione", "only while recording") as NSString).draw(at: NSPoint(x: 66, y: y - 2),
                 withAttributes: [.font: NSFont.systemFont(ofSize: 10), .foregroundColor: NSColor.tertiaryLabelColor])
             return
         }
@@ -143,7 +143,7 @@ final class LevelView: NSView {
 
     override func draw(_ dirty: NSRect) {
         let (txt, col) = status()
-        ("Microfono: \(micName)" as NSString).draw(at: NSPoint(x: 16, y: 6),
+        (L("Microfono: ", "Microphone: ") + micName as NSString).draw(at: NSPoint(x: 16, y: 6),
             withAttributes: [.font: NSFont.boldSystemFont(ofSize: 12), .foregroundColor: NSColor.labelColor])
         (txt as NSString).draw(at: NSPoint(x: 16, y: 22), withAttributes: [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: col])
 
@@ -160,8 +160,8 @@ final class LevelView: NSView {
             NSRect(x: x, y: wave.midY - h / 2, width: max(1, bw - 1), height: h).fill()
         }
 
-        meter("Tu", mic, y: 92)
-        meter("Altri", sys, y: 110)
+        meter(L("Tu", "You"), mic, y: 92)
+        meter(L("Altri", "Others"), sys, y: 110)
         if !note.isEmpty {
             (note as NSString).draw(at: NSPoint(x: 16, y: 126),
                 withAttributes: [.font: NSFont.systemFont(ofSize: 10), .foregroundColor: NSColor.tertiaryLabelColor])
@@ -200,17 +200,18 @@ final class LevelController {
         let dev = MicVolume.deviceID(uid: uid)
         let autoOn = config()["auto_gain"] as? Bool ?? true
         view.micName = dev.map(MicVolume.name) ?? "?"
+        view.agcBox.title = L("Riduci automaticamente se satura", "Lower automatically when clipping")
         view.agcBox.state = autoOn ? .on : .off
         view.setVolume(dev.flatMap(MicVolume.get))
         view.history = []
         agc = AutoGain(uid: uid, enabled: autoOn)
         if currentDir() == nil {
             let go = { self.previewing = self.preview.start(uid: uid)
-                       self.view.note = self.previewing ? "Anteprima: il microfono è in ascolto finché il menu è aperto." : "Anteprima microfono non disponibile (permesso?)" }
+                       self.view.note = self.previewing ? L("Anteprima: il microfono è in ascolto finché il menu è aperto.", "Preview: the mic is listening while the menu is open.") : L("Anteprima microfono non disponibile (permesso?)", "Mic preview not available (permission?)") }
             switch AVCaptureDevice.authorizationStatus(for: .audio) {
             case .authorized: go()
             case .notDetermined: AVCaptureDevice.requestAccess(for: .audio) { ok in DispatchQueue.main.async { if ok { go() } } }
-            default: view.note = "Permesso microfono negato a MeetRec (Impostazioni > Privacy)."
+            default: view.note = L("Permesso microfono negato a MeetRec (Impostazioni > Privacy).", "Microphone permission denied to MeetRec (Settings > Privacy).")
             }
         } else {
             view.note = ""

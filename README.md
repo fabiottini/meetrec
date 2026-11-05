@@ -152,6 +152,7 @@ Le cuffie Bluetooth (AirPods, Sony WH-1000XM…), quando usi il loro microfono, 
 | `context` | `work` | valore di `context:` nel frontmatter |
 | `recordings_dir` | `~/Recordings/meetings` | |
 | `language` | `it` | lingua passata a whisper |
+| `ui_language` | lingua di sistema | lingua di menu e messaggi dell'app: `it` o `en` (Impostazioni > Interfaccia) |
 | `me` / `others_label` | `Me` / `Altri` | etichette delle due tracce |
 | `mic_id` | `null` | `null` = microfono di sistema; gli ID con `meet mics` |
 | `auto_gain` | `true` | abbassa il volume del microfono quando satura |
