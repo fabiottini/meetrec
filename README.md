@@ -152,6 +152,7 @@ Le cuffie Bluetooth (AirPods, Sony WH-1000XM…), quando usi il loro microfono, 
 | `context` | `work` | valore di `context:` nel frontmatter |
 | `recordings_dir` | `~/Recordings/meetings` | |
 | `language` | `it` | lingua passata a whisper |
+| `ui_language` | lingua di sistema | lingua di menu e messaggi dell'app (Impostazioni > Interfaccia), vedi [Lingue](#lingue) |
 | `me` / `others_label` | `Me` / `Altri` | etichette delle due tracce |
 | `mic_id` | `null` | `null` = microfono di sistema; gli ID con `meet mics` |
 | `auto_gain` | `true` | abbassa il volume del microfono quando satura |
@@ -163,6 +164,29 @@ Le cuffie Bluetooth (AirPods, Sony WH-1000XM…), quando usi il loro microfono, 
 | `timezone` | `Europe/Rome` | |
 
 Il token Microsoft è in `~/.config/meetrec/msal_cache.json` (permessi 0600).
+
+## Lingue
+
+I testi dell'app (menu, pannello livelli, impostazioni, avvisi, notifiche) sono in file JSON, uno
+per lingua: [`locales/it.json`](locales/it.json), [`locales/en.json`](locales/en.json).
+
+```json
+{
+  "_language_name": "English",
+  "start_recording": "Start recording",
+  "login_code_copied": "Code {code} copied to the clipboard: ..."
+}
+```
+
+- `_language_name` è il nome che compare in Impostazioni > Interfaccia.
+- `{nome}` è un segnaposto che l'app riempie (per esempio `{code}`).
+- Se una chiave manca, l'app usa l'inglese.
+
+Per aggiungere una lingua o cambiare una frase **senza ricompilare**: metti il file in
+`~/.config/meetrec/locales/<codice>.json` (pulsante "Apri cartella traduzioni" nelle Impostazioni).
+Basta mettere le chiavi che vuoi cambiare: le altre restano quelle del file incluso nell'app.
+La lingua nuova compare nel menu a tendina alla prossima apertura delle Impostazioni.
+Per includerla nell'app, aggiungila a `locales/` e rilancia `./install.sh`.
 
 ## Limiti noti
 
@@ -179,6 +203,7 @@ menubar/main.swift        app barra dei menu (AppKit + SwiftUI), usa il comando 
 menubar/LevelPanel.swift  pannello livelli audio e anteprima del microfono
 shared/MicVolume.swift    volume d'ingresso del microfono (Core Audio), condiviso
 menubar/Info.plist
+locales/                  testi dell'interfaccia, un JSON per lingua
 assets/                   icona (make-icon.swift genera il PNG, AppIcon.icns per l'app)
 docs/                     immagini del README (MeetRec --render-docs docs)
 meet.py                   CLI: registrazione, audio, trascrizione, calendario, nota
