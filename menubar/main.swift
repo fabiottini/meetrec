@@ -600,6 +600,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
 // MARK: - README images, drawn offscreen with demo data: MeetRec --render-docs <dir>
 
+final class FlippedView: NSView { override var isFlipped: Bool { true } }
+
 func savePNG(_ view: NSView, _ path: String, scale: CGFloat = 2) {
     let size = view.bounds.size
     let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size.width * scale), pixelsHigh: Int(size.height * scale),
@@ -633,6 +635,52 @@ func renderDocs(_ dir: String, _ d: AppDelegate) {
     panel.layer?.cornerRadius = 10
     panel.addSubview(lv)
     savePNG(panel, dir + "/levels.png")
+
+    // the whole menu: level panel + items, drawn like a dark macOS menu
+    let rowH: CGFloat = 24, sepH: CGFloat = 11, pad: CGFloat = 6
+    let rows: [(String, String)?] = [
+        nil,
+        (T("start_recording"), "⌘R"), (T("start_with_title"), ""),
+        nil,
+        (T("open_last_note") + "2026-11-05 - Weekly.md", ""), (T("open_recordings_folder"), ""),
+        (T("to_process") + " (1)", "›"),
+        nil,
+        (T("settings"), "⌘,"), ("Log", ""), (T("quit_meetrec"), "⌘Q"),
+    ]
+    let itemsH = rows.reduce(CGFloat(0)) { $0 + ($1 == nil ? sepH : rowH) }
+    let menuView = FlippedView(frame: NSRect(x: 0, y: 0, width: lv.frame.width, height: lv.frame.height + itemsH + pad * 2))
+    menuView.appearance = dark
+    menuView.wantsLayer = true
+    menuView.layer?.backgroundColor = NSColor(white: 0.16, alpha: 1).cgColor
+    menuView.layer?.cornerRadius = 10
+    let lv2 = LevelView()
+    lv2.micName = lv.micName; lv2.history = lv.history; lv2.mic = lv.mic; lv2.sys = lv.sys
+    lv2.setVolume(0.62); lv2.agcBox.state = .on; lv2.agcBox.title = lv.agcBox.title
+    lv2.frame.origin = NSPoint(x: 0, y: pad)
+    menuView.addSubview(lv2)
+    var y = lv2.frame.maxY
+    let font = NSFont.menuFont(ofSize: 13)
+    for r in rows {
+        guard let (title, key) = r else {
+            let sep = NSBox(frame: NSRect(x: 14, y: y + sepH / 2, width: menuView.frame.width - 28, height: 1))
+            sep.boxType = .separator
+            menuView.addSubview(sep)
+            y += sepH
+            continue
+        }
+        let t = NSTextField(labelWithString: title)
+        t.font = font; t.textColor = .labelColor
+        t.frame = NSRect(x: 16, y: y + 3, width: menuView.frame.width - (key.isEmpty ? 32 : 92), height: 18)
+        menuView.addSubview(t)
+        if !key.isEmpty {
+            let k = NSTextField(labelWithString: key)
+            k.font = font; k.textColor = .tertiaryLabelColor; k.alignment = .right
+            k.frame = NSRect(x: menuView.frame.width - 76, y: y + 3, width: 60, height: 18)
+            menuView.addSubview(k)
+        }
+        y += rowH
+    }
+    savePNG(menuView, dir + "/menu.png")
 
     // menu bar states
     let bar = NSView(frame: NSRect(x: 0, y: 0, width: 250, height: 28))

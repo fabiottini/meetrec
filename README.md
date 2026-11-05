@@ -33,11 +33,11 @@ crash non lo fa perdere.
 
 ## Screenshot
 
-| Livelli audio nel menu | Impostazioni |
+| Menu | Impostazioni |
 |---|---|
-| <img src="docs/levels.png" width="330" alt="Pannello livelli audio"> | <img src="docs/settings.png" width="330" alt="Finestra Impostazioni"> |
+| <img src="docs/menu.png" width="330" alt="Menu con livelli audio e comandi"> | <img src="docs/settings.png" width="330" alt="Finestra Impostazioni"> |
 
-Nel pannello dei livelli:
+In cima al menu c'è il pannello dei livelli:
 - **forma d'onda**: gli ultimi 9 secondi del microfono. Blu = ok, arancione = basso,
   rosso = vicino alla saturazione;
 - **Tu / Altri**: livello medio (barra) e picco (tacca);
