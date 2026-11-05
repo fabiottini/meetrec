@@ -1,0 +1,309 @@
+// First-run setup: checks everything MeetRec needs and installs what is missing.
+// Opens by itself when something required is missing, and from the menu ("Setup…").
+
+import AppKit
+import AVFoundation
+import CoreGraphics
+import SwiftUI
+
+let toolPaths = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"]
+let dataDir = URL(fileURLWithPath: "\(home)/Library/Application Support/MeetRec")
+let vibeDir = "\(home)/Library/Application Support/github.com.thewh1teagle.vibe"
+let models: [(file: String, url: String)] = [
+    ("ggml-large-v3-turbo.bin", "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin"),
+    ("ggml-silero-v6.2.0.bin", "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin"),
+]
+
+func findTool(_ name: String) -> String? {
+    toolPaths.map { "\($0)/\(name)" }.first { FileManager.default.isExecutableFile(atPath: $0) }
+}
+
+/// Python 3 for meet.py: Homebrew's, or Apple's when the Command Line Tools are installed
+/// (/usr/bin/python3 alone is only a stub that asks to install them).
+func findPython() -> String? {
+    for p in ["/opt/homebrew/bin/python3", "/usr/local/bin/python3"] where FileManager.default.isExecutableFile(atPath: p) {
+        return p
+    }
+    let clt = ["/Library/Developer/CommandLineTools/usr/bin/python3",
+               "/Applications/Xcode.app/Contents/Developer/usr/bin/python3"]
+    return clt.contains { FileManager.default.fileExists(atPath: $0) } ? "/usr/bin/python3" : nil
+}
+
+func modelPath(_ file: String) -> String? {
+    ["\(dataDir.path)/models/\(file)", "\(vibeDir)/\(file)"].first { FileManager.default.fileExists(atPath: $0) }
+}
+
+/// command line `meet` wrapper pointing to this app
+let cliPath = "\(home)/.local/bin/meet"
+func cliWrapper() -> String? {
+    guard let py = findPython(), let res = Bundle.main.resourceURL?.path else { return nil }
+    let capture = Bundle.main.bundlePath + "/Contents/MacOS/meetrec-capture"
+    return "#!/bin/sh\n# installed by MeetRec.app\nMEETREC_CAPTURE=\"\(capture)\" exec \"\(py)\" \"\(res)/meet.py\" \"$@\"\n"
+}
+
+struct Check: Identifiable {
+    let id: String
+    var title: String
+    var detail: String
+    var ok: Bool
+    var required: Bool
+    var action: String?       // button label, nil = nothing to do
+}
+
+final class SetupModel: NSObject, ObservableObject, URLSessionDownloadDelegate {
+    @Published var checks: [Check] = []
+    @Published var log = ""
+    @Published var busy: String? = nil
+    @Published var progress: Double? = nil
+    var account = ""
+    var onLogin: (() -> Void)?
+    private var downloadQueue: [(file: String, url: String)] = []
+
+    var requiredMissing: Bool { checks.contains { $0.required && !$0.ok } }
+
+    func refresh(_ done: (() -> Void)? = nil) {
+        runMeet(["whoami"]) { status, out in
+            self.account = status == 0 ? out.trimmingCharacters(in: .whitespacesAndNewlines) : ""
+            self.build()
+            done?()
+        }
+        build()
+    }
+
+    private func build() {
+        let brew = findTool("brew")
+        let cfg = (try? JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: configFile)))) as? [String: Any] ?? [:]
+        let vault = cfg["vault"] as? String ?? ""
+        let micOK = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+        let screenOK = CGPreflightScreenCaptureAccess()
+        let cliOK = (try? String(contentsOfFile: cliPath, encoding: .utf8)) == cliWrapper()
+        let model = modelPath(models[0].file)
+        checks = [
+            Check(id: "brew", title: "Homebrew", detail: brew ?? T("setup_brew_missing"),
+                  ok: brew != nil, required: true, action: brew == nil ? T("setup_how_to_install") : nil),
+            Check(id: "python", title: "Python 3", detail: findPython() ?? T("setup_python_missing"),
+                  ok: findPython() != nil, required: true, action: findPython() == nil ? T("setup_install") : nil),
+            Check(id: "ffmpeg", title: "ffmpeg", detail: findTool("ffmpeg") ?? "brew install ffmpeg",
+                  ok: findTool("ffmpeg") != nil, required: true, action: findTool("ffmpeg") == nil ? T("setup_install") : nil),
+            Check(id: "whisper", title: "whisper.cpp", detail: findTool("whisper-cli") ?? "brew install whisper-cpp",
+                  ok: findTool("whisper-cli") != nil, required: true, action: findTool("whisper-cli") == nil ? T("setup_install") : nil),
+            Check(id: "model", title: T("setup_model"),
+                  detail: model.map { $0.hasPrefix(vibeDir) ? T("setup_model_in_vibe") : $0 } ?? T("setup_model_missing"),
+                  ok: model != nil && modelPath(models[1].file) != nil, required: true,
+                  action: model == nil || modelPath(models[1].file) == nil ? T("setup_download")
+                        : (models.contains { modelPath($0.file)!.hasPrefix(vibeDir) } ? T("setup_copy_from_vibe") : nil)),
+            Check(id: "mic", title: T("setup_mic_permission"), detail: micOK ? "OK" : T("setup_mic_permission_detail"),
+                  ok: micOK, required: true, action: micOK ? nil : T("setup_allow")),
+            Check(id: "screen", title: T("setup_screen_permission"), detail: screenOK ? "OK" : T("setup_screen_permission_detail"),
+                  ok: screenOK, required: true, action: screenOK ? nil : T("setup_allow")),
+            Check(id: "vault", title: T("setup_vault"), detail: vault.isEmpty ? T("setup_vault_missing") : vault,
+                  ok: !vault.isEmpty && FileManager.default.fileExists(atPath: vault), required: true, action: T("setup_choose")),
+            Check(id: "outlook", title: T("setup_outlook"), detail: account.isEmpty ? T("setup_outlook_detail") : account,
+                  ok: !account.isEmpty, required: false, action: account.isEmpty ? T("setup_login") : nil),
+            Check(id: "claude", title: T("setup_claude"), detail: findTool("claude") ?? (FileManager.default.isExecutableFile(atPath: "\(home)/.local/bin/claude") ? "\(home)/.local/bin/claude" : T("setup_claude_detail")),
+                  ok: findTool("claude") != nil || FileManager.default.isExecutableFile(atPath: "\(home)/.local/bin/claude"), required: false, action: nil),
+            Check(id: "cli", title: T("setup_cli"), detail: cliOK ? cliPath : T("setup_cli_detail"),
+                  ok: cliOK, required: false, action: cliOK ? nil : T("setup_install")),
+        ]
+    }
+
+    func run(_ id: String) {
+        switch id {
+        case "brew":
+            let cmd = "/bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(cmd, forType: .string)
+            log += T("setup_brew_copied") + "\n"
+            NSWorkspace.shared.open(URL(string: "https://brew.sh")!)
+        case "python": brewInstall(["python"])
+        case "ffmpeg": brewInstall(["ffmpeg"])
+        case "whisper": brewInstall(["whisper-cpp"])
+        case "model": installModels()
+        case "mic":
+            if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
+                AVCaptureDevice.requestAccess(for: .audio) { _ in DispatchQueue.main.async { self.build() } }
+            } else {
+                NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!)
+            }
+        case "screen":
+            if !CGRequestScreenCaptureAccess() {
+                NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
+                log += T("setup_screen_restart") + "\n"
+            }
+            build()
+        case "vault": chooseVault()
+        case "outlook": onLogin?()
+        case "cli": installCLI()
+        default: break
+        }
+    }
+
+    // MARK: actions
+
+    private func brewInstall(_ pkgs: [String]) {
+        guard let brew = findTool("brew") else { return }
+        busy = "brew install " + pkgs.joined(separator: " ")
+        log += "$ \(busy!)\n"
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: brew)
+        p.arguments = ["install"] + pkgs
+        var env = ProcessInfo.processInfo.environment
+        env["PATH"] = toolPaths.joined(separator: ":") + ":/bin:/usr/sbin:/sbin"
+        env["HOMEBREW_NO_AUTO_UPDATE"] = "1"     // much faster; update separately if needed
+        p.environment = env
+        let pipe = Pipe()
+        p.standardOutput = pipe; p.standardError = pipe
+        pipe.fileHandleForReading.readabilityHandler = { h in
+            if let s = String(data: h.availableData, encoding: .utf8), !s.isEmpty {
+                DispatchQueue.main.async { self.log += s }
+            }
+        }
+        p.terminationHandler = { proc in
+            pipe.fileHandleForReading.readabilityHandler = nil
+            DispatchQueue.main.async {
+                self.log += proc.terminationStatus == 0 ? "✓\n" : "✗ exit \(proc.terminationStatus)\n"
+                self.busy = nil
+                self.build()
+            }
+        }
+        do { try p.run() } catch { log += "\(error)\n"; busy = nil }
+    }
+
+    private func installModels() {
+        let dir = dataDir.appendingPathComponent("models")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        downloadQueue = []
+        for m in models where modelPath(m.file) == nil || modelPath(m.file)!.hasPrefix(vibeDir) {
+            let dest = dir.appendingPathComponent(m.file)
+            if FileManager.default.fileExists(atPath: dest.path) { continue }
+            if FileManager.default.fileExists(atPath: "\(vibeDir)/\(m.file)") {
+                // copy from Vibe (APFS clone: instant, no extra space) so Vibe can be removed later
+                try? FileManager.default.copyItem(atPath: "\(vibeDir)/\(m.file)", toPath: dest.path)
+                log += T("setup_model_copied", ["file": m.file]) + "\n"
+            } else {
+                downloadQueue.append(m)
+            }
+        }
+        nextDownload()
+        build()
+    }
+
+    private func nextDownload() {
+        guard !downloadQueue.isEmpty else { busy = nil; progress = nil; build(); return }
+        let m = downloadQueue[0]
+        busy = T("setup_downloading", ["file": m.file])
+        progress = 0
+        log += "↓ \(m.url)\n"
+        let s = URLSession(configuration: .default, delegate: self, delegateQueue: .main)
+        s.downloadTask(with: URL(string: m.url)!).resume()
+    }
+
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData _: Int64,
+                    totalBytesWritten w: Int64, totalBytesExpectedToWrite t: Int64) {
+        if t > 0 { progress = Double(w) / Double(t) }
+    }
+
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
+        let m = downloadQueue.removeFirst()
+        let dest = dataDir.appendingPathComponent("models/\(m.file)")
+        try? FileManager.default.removeItem(at: dest)
+        do { try FileManager.default.moveItem(at: location, to: dest); log += "✓ \(m.file)\n" }
+        catch { log += "✗ \(m.file): \(error.localizedDescription)\n" }
+        session.finishTasksAndInvalidate()
+        nextDownload()
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        if let error {
+            log += "✗ \(error.localizedDescription)\n"
+            downloadQueue = []
+            busy = nil; progress = nil
+            build()
+        }
+    }
+
+    private func chooseVault() {
+        let p = NSOpenPanel()
+        p.canChooseDirectories = true; p.canChooseFiles = false
+        p.message = T("setup_vault_panel")
+        NSApp.activate(ignoringOtherApps: true)
+        guard p.runModal() == .OK, let u = p.url else { return }
+        var cfg = (try? JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: configFile)))) as? [String: Any] ?? [:]
+        cfg["vault"] = u.path
+        try? FileManager.default.createDirectory(atPath: (configFile as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        if let d = try? JSONSerialization.data(withJSONObject: cfg, options: [.prettyPrinted, .sortedKeys]) {
+            try? d.write(to: URL(fileURLWithPath: configFile), options: .atomic)
+        }
+        build()
+    }
+
+    private func installCLI() {
+        guard let w = cliWrapper() else { return }
+        try? FileManager.default.createDirectory(atPath: "\(home)/.local/bin", withIntermediateDirectories: true)
+        try? FileManager.default.removeItem(atPath: cliPath)
+        do {
+            try w.write(toFile: cliPath, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: cliPath)
+            log += T("setup_cli_done", ["path": cliPath]) + "\n"
+        } catch { log += "✗ \(error.localizedDescription)\n" }
+        build()
+    }
+}
+
+struct SetupView: View {
+    @ObservedObject var m: SetupModel
+    var onClose: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 48, height: 48)
+                VStack(alignment: .leading) {
+                    Text(T("setup_title")).font(.title2).bold()
+                    Text(T("setup_subtitle")).foregroundStyle(.secondary)
+                }
+            }
+            List(m.checks) { c in
+                HStack(alignment: .top) {
+                    Image(systemName: c.ok ? "checkmark.circle.fill" : (c.required ? "xmark.circle.fill" : "minus.circle"))
+                        .foregroundStyle(c.ok ? .green : (c.required ? .red : .secondary))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(c.title + (c.required ? "" : "  · " + T("setup_optional")))
+                        Text(c.detail).font(.caption).foregroundStyle(.secondary).lineLimit(2).truncationMode(.middle)
+                    }
+                    Spacer()
+                    if let a = c.action {
+                        Button(a) { m.run(c.id) }.disabled(m.busy != nil)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+            .frame(minHeight: 400)
+            if let b = m.busy {
+                HStack {
+                    if let p = m.progress { ProgressView(value: p).frame(width: 200) } else { ProgressView().controlSize(.small) }
+                    Text(b + (m.progress.map { String(format: " %.0f%%", $0 * 100) } ?? "")).font(.caption)
+                }
+            }
+            if !m.log.isEmpty {
+                ScrollView {
+                    Text(m.log).font(.system(.caption, design: .monospaced)).frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                }
+                .frame(height: 110)
+                .padding(6)
+                .background(Color(nsColor: .textBackgroundColor).opacity(0.5))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+            HStack {
+                Button(T("setup_recheck")) { m.refresh() }.disabled(m.busy != nil)
+                Spacer()
+                Text(m.requiredMissing ? T("setup_missing") : T("setup_ready"))
+                    .foregroundStyle(m.requiredMissing ? .orange : .green)
+                Button(T("setup_close")) { onClose() }.keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(18)
+        .frame(width: 620, height: 720)
+    }
+}

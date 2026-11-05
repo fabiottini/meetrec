@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""meet: record meetings from the CLI, transcribe locally with Vibe, link to Outlook, save to Obsidian.
+"""meet: record meetings from the CLI, transcribe locally with whisper.cpp, link to Outlook, save to Obsidian.
 
   meet start [-t TITLE]     start recording in background (mic + system audio)
   meet stop [--no-process]  stop and process (transcript + note)
@@ -23,6 +23,7 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -33,6 +34,23 @@ CONF_DIR = HOME / ".config" / "meetrec"
 STATE_DIR = HOME / ".local" / "state" / "meetrec"
 CURRENT = STATE_DIR / "current.json"
 VIBE_SUPPORT = HOME / "Library/Application Support/github.com.thewh1teagle.vibe"
+DATA_DIR = HOME / "Library" / "Application Support" / "MeetRec"      # models downloaded by the app setup
+MODEL_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin"
+VAD_URL = "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin"
+
+
+def first_existing(*paths):
+    for p in paths:
+        if p and Path(p).exists():
+            return str(p)
+    return str(paths[0]) if paths else ""
+
+
+def find_capture():
+    # inside MeetRec.app: Contents/Resources/meet.py -> Contents/MacOS/meetrec-capture; in the repo: capture/
+    return first_existing(os.environ.get("MEETREC_CAPTURE"),
+                          APP_DIR.parent / "MacOS" / "meetrec-capture",
+                          APP_DIR / "capture" / "meetrec-capture")
 
 DEFAULTS = {
     "recordings_dir": str(HOME / "Recordings" / "meetings"),
@@ -43,10 +61,15 @@ DEFAULTS = {
     "language": "it",
     "me": "Me",                                        # label for the mic track
     "others_label": "Altri",                           # label for the system-audio track
+    # transcription: whisper.cpp (brew install whisper-cpp); Vibe only as a fallback if whisper-cli is missing
+    "whisper_bin": first_existing(shutil.which("whisper-cli"), "/opt/homebrew/bin/whisper-cli", "/usr/local/bin/whisper-cli"),
+    "whisper_model": first_existing(DATA_DIR / "models" / "ggml-large-v3-turbo.bin", VIBE_SUPPORT / "ggml-large-v3-turbo.bin"),
+    "vad_model": first_existing(DATA_DIR / "models" / "ggml-silero-v6.2.0.bin", VIBE_SUPPORT / "ggml-silero-v6.2.0.bin"),
+    "whisper_threads": 4,                              # keeps the Mac responsive while transcribing
     "vibe_bin": "/Applications/vibe.app/Contents/MacOS/vibe",
     "vibe_model": str(VIBE_SUPPORT / "ggml-large-v3-turbo.bin"),
-    "ffmpeg": shutil.which("ffmpeg") or "/opt/homebrew/bin/ffmpeg",
-    "capture_bin": str(APP_DIR / "capture" / "meetrec-capture"),
+    "ffmpeg": first_existing(shutil.which("ffmpeg"), "/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"),
+    "capture_bin": find_capture(),
     "mic_id": None,
     "auto_gain": True,                                 # lower the mic input volume when it clips
     "summary": True,
@@ -74,6 +97,10 @@ def load_conf():
         f.write_text(json.dumps({k: DEFAULTS[k] for k in USER_KEYS}, indent=2) + "\n")
     if os.environ.get("MEETREC_CONF"):      # extra overrides, e.g. for tests
         conf.update(json.loads(Path(os.environ["MEETREC_CONF"]).read_text()))
+    # old configs pinned paths that may not exist any more (e.g. repo moved, app bundle): use defaults then
+    for k in ("capture_bin", "ffmpeg", "whisper_bin", "whisper_model", "vad_model"):
+        if not conf.get(k) or not Path(conf[k]).exists():
+            conf[k] = DEFAULTS[k]
     return conf
 
 
@@ -324,6 +351,53 @@ def free_port():
 def transcribe(d, tracks, lang):
     if all((d / f"{n}.segments.json").exists() for n in tracks):
         return {n: read_json(d / f"{n}.segments.json") for n in tracks}
+    if Path(C["whisper_bin"]).exists() and Path(C["whisper_model"]).exists():
+        return transcribe_whisper(d, tracks, lang)
+    if Path(C["vibe_bin"]).exists():
+        say("whisper.cpp not found, using Vibe")
+        return transcribe_vibe(d, tracks, lang)
+    raise RuntimeError("no transcription engine: install whisper.cpp (brew install whisper-cpp) "
+                       "and the model (MeetRec > Setup)")
+
+
+def transcribe_whisper(d, tracks, lang):
+    """whisper.cpp CLI, one track at a time, with VAD (skips silence: about 2x faster)."""
+    result = {}
+    for n in tracks:
+        out = d / f"{n}.segments.json"
+        if out.exists():
+            result[n] = read_json(out)
+            continue
+        say(f"transcribing {n} ({probe_duration(d / f'{n}.wav') / 60:.0f} min audio)...")
+        t = time.time()
+        cmd = [C["whisper_bin"], "-m", C["whisper_model"], "-f", str(d / f"{n}.wav"), "-l", lang,
+               "-t", str(C["whisper_threads"]), "-oj", "-of", str(d / f"{n}.whisper"), "-np", "-pp"]
+        if Path(C["vad_model"]).exists():
+            cmd += ["--vad", "-vm", C["vad_model"]]
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        last = -1
+        tail = []
+        for line in p.stdout:
+            tail = (tail + [line])[-20:]
+            m = re.search(r"progress\s*=\s*(\d+)%", line)
+            if m and int(m[1]) // 10 != last:          # report every 10%
+                last = int(m[1]) // 10
+                say(f"transcribing {n}: {m[1]}%")
+        if p.wait():
+            raise RuntimeError(f"whisper-cli failed on {n}: {''.join(tail)[-800:]}")
+        raw = read_json(d / f"{n}.whisper.json", {})
+        data = {"engine": "whisper.cpp", "segments": [
+            {"start": x["offsets"]["from"] / 1000, "end": x["offsets"]["to"] / 1000,
+             "text": x["text"], "no_speech_prob": 0.0}
+            for x in raw.get("transcription", [])]}
+        write_json(out, data)
+        (d / f"{n}.whisper.json").unlink(missing_ok=True)
+        result[n] = data
+        say(f"  done in {time.time() - t:.0f}s")
+    return result
+
+
+def transcribe_vibe(d, tracks, lang):
     port = free_port()
     srv = subprocess.Popen([C["vibe_bin"], "serve", "-p", str(port), "--exit-with-parent", "true", C["vibe_model"]],
                            stdout=open(d / "vibe-server.log", "ab"), stderr=subprocess.STDOUT)
@@ -445,53 +519,101 @@ def transcript_md(turns, single_track):
 
 # ---------------------------------------------------------------- calendar (Microsoft Graph)
 
-def msal_app():
-    import msal
-    cache = msal.SerializableTokenCache()
+# OAuth device code flow with the standard library only (no msal), tokens in token.json (0600)
+
+SCOPES = "Calendars.Read offline_access openid profile"
+TOKEN_FILE = CONF_DIR / "token.json"
+
+
+def oauth_post(path, data):
+    req = urllib.request.Request(f"{C['ms_authority']}/oauth2/v2.0/{path}",
+                                 data=urllib.parse.urlencode(data).encode(), method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        try:
+            return json.loads(e.read())
+        except Exception:
+            return {"error": str(e)}
+
+
+def jwt_claims(tok):
+    import base64
+    try:
+        part = tok.split(".")[1]
+        return json.loads(base64.urlsafe_b64decode(part + "=" * (-len(part) % 4)))
+    except Exception:
+        return {}
+
+
+def save_token(res, username=None):
+    old = read_json(TOKEN_FILE, {})
+    claims = jwt_claims(res.get("id_token", ""))
+    data = {"access_token": res["access_token"],
+            "refresh_token": res.get("refresh_token") or old.get("refresh_token"),
+            "expires_at": time.time() + int(res.get("expires_in", 3600)) - 120,
+            "username": claims.get("preferred_username") or username or old.get("username")}
+    CONF_DIR.mkdir(parents=True, exist_ok=True)
+    TOKEN_FILE.write_text(json.dumps(data, indent=2))
+    os.chmod(TOKEN_FILE, 0o600)
+    return data
+
+
+def migrate_msal_cache():
+    """reuse the refresh token of the old msal cache, so an existing login keeps working"""
     cf = CONF_DIR / "msal_cache.json"
-    if cf.exists():
-        cache.deserialize(cf.read_text())
-    app = msal.PublicClientApplication(C["ms_client_id"], authority=C["ms_authority"], token_cache=cache)
-    return app, cache, cf
-
-
-def save_cache(cache, cf):
-    if cache.has_state_changed:
-        CONF_DIR.mkdir(parents=True, exist_ok=True)
-        cf.write_text(cache.serialize())
-        os.chmod(cf, 0o600)
-
-
-SCOPES = ["Calendars.Read"]
+    if TOKEN_FILE.exists() or not cf.exists():
+        return
+    cache = read_json(cf, {})
+    rt = next(iter(cache.get("RefreshToken", {}).values()), {}).get("secret")
+    user = next(iter(cache.get("Account", {}).values()), {}).get("username")
+    if rt:
+        res = oauth_post("token", {"grant_type": "refresh_token", "client_id": C["ms_client_id"],
+                                   "refresh_token": rt, "scope": SCOPES})
+        if "access_token" in res:
+            save_token(res, user)          # the old cache is left in place (removed by logout)
 
 
 def cmd_login(a):
-    app, cache, cf = msal_app()
-    flow = app.initiate_device_flow(scopes=SCOPES)
+    flow = oauth_post("devicecode", {"client_id": C["ms_client_id"], "scope": SCOPES})
     if "user_code" not in flow:
-        say(f"device flow failed: {flow.get('error_description')}")
+        say(f"device flow failed: {flow.get('error_description') or flow.get('error')}")
         return 1
-    print(flow["message"], flush=True)
-    res = app.acquire_token_by_device_flow(flow)
-    save_cache(cache, cf)
-    if "access_token" in res:
-        say(f"logged in as {res.get('id_token_claims', {}).get('preferred_username')}")
-        return 0
-    say(f"login failed: {res.get('error')}: {res.get('error_description')}")
+    print(flow["message"], flush=True)       # the app reads URL and code from this line
+    interval, deadline = int(flow.get("interval", 5)), time.time() + int(flow.get("expires_in", 900))
+    while time.time() < deadline:
+        time.sleep(interval)
+        res = oauth_post("token", {"grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+                                   "client_id": C["ms_client_id"], "device_code": flow["device_code"]})
+        if "access_token" in res:
+            data = save_token(res)
+            say(f"logged in as {data.get('username')}")
+            return 0
+        err = res.get("error")
+        if err == "slow_down":
+            interval += 5
+        elif err != "authorization_pending":
+            say(f"login failed: {err}: {res.get('error_description', '')[:300]}")
+            return 1
+    say("login failed: code expired")
     return 1
 
 
 def graph_token():
-    try:
-        app, cache, cf = msal_app()
-    except ImportError:
+    migrate_msal_cache()
+    tok = read_json(TOKEN_FILE)
+    if not tok:
         return None
-    accts = app.get_accounts()
-    if not accts:
+    if time.time() < tok.get("expires_at", 0):
+        return tok["access_token"]
+    if not tok.get("refresh_token"):
         return None
-    res = app.acquire_token_silent(SCOPES, account=accts[0])
-    save_cache(cache, cf)
-    return res.get("access_token") if res else None
+    res = oauth_post("token", {"grant_type": "refresh_token", "client_id": C["ms_client_id"],
+                               "refresh_token": tok["refresh_token"], "scope": SCOPES})
+    if "access_token" not in res:
+        return None
+    return save_token(res)["access_token"]
 
 
 def graph_events(start, end):
@@ -584,12 +706,8 @@ def people_links(event):
 
 
 def graph_me_email():
-    try:
-        app, _, _ = msal_app()
-        accts = app.get_accounts()
-        return accts[0]["username"].lower() if accts else None
-    except Exception:
-        return None
+    u = read_json(TOKEN_FILE, {}).get("username")
+    return u.lower() if u else None
 
 
 def safe_filename(s):
@@ -698,7 +816,7 @@ def write_note(d, meta, event, turns, single_track, summary_line, summary_body):
     who = ("traccia unica, interlocutori non separati" if single_track else
            f"**{C['me']}** = mio microfono, **{C['others_label']}** = audio degli altri partecipanti")
     body += ["## Trascrizione", "",
-             f"_Trascrizione automatica locale (Vibe, whisper large-v3-turbo); {who}._", "",
+             f"_Trascrizione automatica locale (whisper large-v3-turbo); {who}._", "",
              transcript_md(turns, single_track) or "_(nessun parlato riconosciuto)_"]
     note.write_text("\n".join(fm) + "\n" + "\n".join(body) + "\n")
     return note
@@ -777,21 +895,18 @@ def cmd_recover(a):
 
 
 def cmd_whoami(a):
-    try:
-        app, _, _ = msal_app()
-    except ImportError:
-        print("msal not installed")
-        return 1
-    accts = app.get_accounts()
-    if not accts:
+    migrate_msal_cache()
+    tok = read_json(TOKEN_FILE)
+    if not tok:
         print("not logged in")
         return 1
     ok = graph_token() is not None
-    print(accts[0]["username"] + ("" if ok else " (token expired: run meet login)"))
+    print((tok.get("username") or "?") + ("" if ok else " (token expired: run meet login)"))
     return 0 if ok else 1
 
 
 def cmd_logout(a):
+    TOKEN_FILE.unlink(missing_ok=True)
     (CONF_DIR / "msal_cache.json").unlink(missing_ok=True)
     say("logged out")
     return 0
