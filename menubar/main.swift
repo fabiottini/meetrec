@@ -75,8 +75,9 @@ func T(_ key: String, _ args: [String: String] = [:]) -> String {
 
 // MARK: - process helper
 
+@discardableResult
 func runMeet(_ args: [String], onLine: ((String) -> Void)? = nil,
-             completion: @escaping (Int32, String) -> Void) {
+             completion: @escaping (Int32, String) -> Void) -> Process {
     let p = Process()
     var env = ProcessInfo.processInfo.environment
     if let script = bundledScript, let py = findPython() {
@@ -119,6 +120,7 @@ func runMeet(_ args: [String], onLine: ((String) -> Void)? = nil,
         DispatchQueue.main.async { completion(proc.terminationStatus, out) }
     }
     do { try p.run() } catch { completion(-1, "cannot run \(meetBin): \(error)") }
+    return p
 }
 
 func appendLog(_ s: String) {
@@ -320,7 +322,12 @@ final class RadioTarget: NSObject {
     @objc func clicked(_ b: NSButton) { onClick?(b) }
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelegate {
+
+    func windowWillClose(_ n: Notification) {
+        if (n.object as? NSWindow) === setupWindow { setup.cancelLogin() }
+    }
+
     var item: NSStatusItem!
     var timer: Timer?
     var processing = false
@@ -641,6 +648,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationWillTerminate(_ n: Notification) {
+        setup.cancelLogin()                  // never leave a login waiting in the background
         MicMute.shared.restoreAll()          // never leave the mic muted without the app
     }
 
@@ -761,6 +769,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self?.setupWindow?.close()
             }))
             w.title = "MeetRec – Setup"
+            w.delegate = self
             w.styleMask = [.titled, .closable]
             w.isReleasedWhenClosed = false
             setupWindow = w

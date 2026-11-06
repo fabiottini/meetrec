@@ -65,6 +65,10 @@ final class SetupModel: NSObject, ObservableObject, URLSessionDownloadDelegate {
     @Published var accounts: [CalAccount] = []
     @Published var googleClient = false
     @Published var loginMessage = ""
+    @Published var loginRunning = false
+    @Published var loginURL = ""
+    private var loginProc: Process?
+    private var loginCancelled = false
     private var downloadQueue: [(file: String, url: String)] = []
 
     var requiredMissing: Bool { checks.contains { $0.required && !$0.ok } }
@@ -86,22 +90,41 @@ final class SetupModel: NSObject, ObservableObject, URLSessionDownloadDelegate {
     // MARK: calendar accounts
 
     /// shared by Microsoft (device code: copy the code, open the page) and Google (browser opens by itself)
+    func cancelLogin() {
+        guard let p = loginProc, p.isRunning else { return }
+        loginCancelled = true
+        p.terminate()
+    }
+
     private func runLogin(_ args: [String]) {
         busy = T("cal_logging_in")
         loginMessage = ""
-        runMeet(args, onLine: { line in
+        loginCancelled = false
+        loginRunning = true
+        loginURL = ""
+        loginProc = runMeet(args, onLine: { line in
             if let urlR = line.range(of: #"https://microsoft\.com/\S+|https://login\.microsoft\S+"#, options: .regularExpression),
                let codeR = line.range(of: #"code ([A-Z0-9]+)"#, options: .regularExpression) {
                 let code = String(line[codeR].dropFirst(5))
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(code, forType: .string)
                 self.loginMessage = T("login_code_copied", ["code": code])
-                if let u = URL(string: String(line[urlR])) { NSWorkspace.shared.open(u) }
-            } else if line.contains("accounts.google.com") {
+                self.loginURL = String(line[urlR])
+                if let u = URL(string: self.loginURL) { NSWorkspace.shared.open(u) }
+            } else if let r = line.range(of: #"https://accounts\.google\.com/\S+"#, options: .regularExpression) {
+                self.loginURL = String(line[r])
                 self.loginMessage = T("cal_google_browser")
             }
         }) { status, out in
             self.busy = nil
+            self.loginRunning = false
+            self.loginProc = nil
+            self.loginURL = ""
+            if self.loginCancelled {
+                self.loginMessage = T("cal_login_cancelled")
+                self.refresh()
+                return
+            }
             self.loginMessage = status == 0 ? T("logged_in") : T("login_failed") + (out.split(separator: "\n").last.map(String.init) ?? "")
             self.log += out.split(separator: "\n").filter { $0.hasPrefix("[meet]") }.joined(separator: "\n") + "\n"
             self.refresh()
@@ -112,24 +135,15 @@ final class SetupModel: NSObject, ObservableObject, URLSessionDownloadDelegate {
 
     func addGoogle() {
         if googleClient { runLogin(["account", "add", "google"]); return }
-        let a = NSAlert()
-        a.messageText = T("cal_google_client_title")
-        a.informativeText = T("cal_google_client_info")
-        a.addButton(withTitle: T("cal_google_choose_json")); a.addButton(withTitle: T("cal_google_open_console")); a.addButton(withTitle: T("cancel"))
-        NSApp.activate(ignoringOtherApps: true)
-        switch a.runModal() {
-        case .alertFirstButtonReturn:
-            let p = NSOpenPanel()
-            p.allowedContentTypes = [.json]
-            NSApp.activate(ignoringOtherApps: true)
-            guard p.runModal() == .OK, let u = p.url else { return }
-            runMeet(["account", "google-client", u.path]) { status, out in
-                self.log += out
-                if status == 0 { self.googleClient = true; self.runLogin(["account", "add", "google"]) }
+        GoogleGuide.shared.show { [weak self] path in
+            runMeet(["account", "google-client", path]) { status, out in
+                self?.log += out
+                if status == 0 {
+                    GoogleGuide.shared.close()
+                    self?.googleClient = true
+                    self?.runLogin(["account", "add", "google"])
+                }
             }
-        case .alertSecondButtonReturn:
-            NSWorkspace.shared.open(URL(string: "https://console.cloud.google.com/apis/credentials")!)
-        default: break
         }
     }
 
@@ -378,7 +392,25 @@ struct SetupView: View {
                         }
                     }
                     .disabled(m.busy != nil)
-                    if !m.loginMessage.isEmpty { Text(m.loginMessage).font(.caption).textSelection(.enabled) }
+                    if !m.loginMessage.isEmpty || m.loginRunning {
+                        HStack {
+                            Text(m.loginMessage).font(.caption).textSelection(.enabled)
+                            Spacer()
+                            if m.loginRunning { Button(T("cancel")) { m.cancelLogin() } }
+                        }
+                        if m.loginRunning && !m.loginURL.isEmpty {
+                            HStack {
+                                Text(m.loginURL).font(.system(.caption, design: .monospaced))
+                                    .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+                                Spacer()
+                                Button(T("cal_copy_link")) {
+                                    NSPasteboard.general.clearContents()
+                                    NSPasteboard.general.setString(m.loginURL, forType: .string)
+                                }
+                            }
+                            Text(T("cal_other_browser")).font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(4)
@@ -410,4 +442,80 @@ struct SetupView: View {
         .padding(18)
         .frame(width: 660, height: 860)
     }
+}
+
+
+// MARK: - step by step guide for the Google OAuth client (once)
+
+struct GoogleGuideView: View {
+    let onJSON: (String) -> Void
+    let onClose: () -> Void
+    let steps: [(String, String, String?)] = [
+        ("g1_title", "g1_text", "https://console.cloud.google.com/projectcreate"),
+        ("g2_title", "g2_text", "https://console.cloud.google.com/apis/library/calendar-json.googleapis.com"),
+        ("g3_title", "g3_text", "https://console.cloud.google.com/apis/credentials/consent"),
+        ("g4_title", "g4_text", "https://console.cloud.google.com/auth/audience"),
+        ("g5_title", "g5_text", "https://console.cloud.google.com/apis/credentials"),
+        ("g6_title", "g6_text", nil),
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(T("g_title")).font(.title2).bold()
+            Text(T("g_intro")).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    ForEach(Array(steps.enumerated()), id: \.offset) { i, st in
+                        HStack(alignment: .top, spacing: 10) {
+                            Text("\(i + 1)").font(.headline).frame(width: 24, height: 24)
+                                .background(Circle().fill(Color.accentColor.opacity(0.25)))
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(T(st.0)).font(.headline)
+                                Text(T(st.1)).font(.callout).fixedSize(horizontal: false, vertical: true)
+                                    .textSelection(.enabled)
+                            }
+                            Spacer()
+                            if let u = st.2 {
+                                Button(T("g_open")) { NSWorkspace.shared.open(URL(string: u)!) }
+                            }
+                        }
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+            HStack {
+                Button(T("cancel")) { onClose() }
+                Spacer()
+                Button(T("cal_google_choose_json")) {
+                    let p = NSOpenPanel()
+                    p.allowedContentTypes = [.json]
+                    p.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+                    NSApp.activate(ignoringOtherApps: true)
+                    if p.runModal() == .OK, let u = p.url { onJSON(u.path) }
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 620, height: 680)
+    }
+}
+
+final class GoogleGuide {
+    static let shared = GoogleGuide()
+    private var window: NSWindow?
+
+    func show(onJSON: @escaping (String) -> Void) {
+        let v = GoogleGuideView(onJSON: onJSON, onClose: { [weak self] in self?.close() })
+        let w = NSWindow(contentViewController: NSHostingController(rootView: v))
+        w.title = "MeetRec – Google"
+        w.styleMask = [.titled, .closable]
+        w.isReleasedWhenClosed = false
+        w.center()
+        window = w
+        NSApp.activate(ignoringOtherApps: true)
+        w.makeKeyAndOrderFront(nil)
+    }
+
+    func close() { window?.close(); window = nil }
 }
