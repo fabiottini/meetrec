@@ -9,7 +9,7 @@
   meet import FILE [-t TITLE] [--at "YYYY-MM-DD HH:MM"]   process an existing audio file (mp3, wav, m4a…)
   meet recover              list recordings never processed (e.g. after a crash)
   meet accounts             calendar accounts (Microsoft, Google, macOS Calendar), as many as you want
-  meet account add microsoft [--personal] | google | macos;  meet account remove ID
+  meet account add microsoft | google | macos;  meet account remove ID
   meet candidates DIR / meet choose DIR N|none   events found for a recording, pick one
   meet events [DATE]        list calendar events of a day (test)
   meet mics                 list microphones
@@ -667,9 +667,14 @@ def my_emails():
 
 # ---- Microsoft
 
+MSA_TENANT = "9188040d-6c67-4c5b-b112-36a304b66dad"     # tenant id of personal Microsoft accounts
+
+
 def ms_authority(acc):
-    if acc.get("authority") == "consumers":
-        return "https://login.microsoftonline.com/consumers"
+    """login: 'common' (work, school or personal); refresh: the account's own kind"""
+    a = acc.get("authority", "organizations")
+    if a in ("consumers", "common"):
+        return f"https://login.microsoftonline.com/{a}"
     return C["ms_authority"]
 
 
@@ -677,9 +682,9 @@ def ms_post(acc, path, data):
     return http_json(f"{ms_authority(acc)}/oauth2/v2.0/{path}", data, method="POST")
 
 
-def ms_login(personal):
-    acc = {"id": new_account_id("microsoft"), "provider": "microsoft",
-           "authority": "consumers" if personal else "organizations", "scopes": MS_SCOPES}
+def ms_login():
+    # one login for every kind of Microsoft account; the kind decides how the token is refreshed
+    acc = {"id": new_account_id("microsoft"), "provider": "microsoft", "authority": "common", "scopes": MS_SCOPES}
     flow = ms_post(acc, "devicecode", {"client_id": C["ms_client_id"], "scope": MS_SCOPES})
     if "user_code" not in flow:
         say(f"device flow failed: {flow.get('error_description') or flow.get('error')}")
@@ -691,6 +696,8 @@ def ms_login(personal):
         res = ms_post(acc, "token", {"grant_type": "urn:ietf:params:oauth:grant-type:device_code",
                                      "client_id": C["ms_client_id"], "device_code": flow["device_code"]})
         if "access_token" in res:
+            personal = jwt_claims(res.get("id_token", "")).get("tid") == MSA_TENANT
+            acc["authority"] = "consumers" if personal else "organizations"
             return add_logged_account(acc, res)
         err = res.get("error")
         if err == "slow_down":
@@ -1000,7 +1007,7 @@ def cmd_accounts(a):
 def cmd_account(a):
     if a.action == "add":
         if a.provider == "microsoft":
-            return ms_login(a.personal)
+            return ms_login()
         if a.provider == "google":
             return google_login()
         if a.provider == "macos":
@@ -1039,7 +1046,7 @@ def cmd_account(a):
 
 
 def cmd_login(a):          # old command: add a Microsoft work account
-    return ms_login(False)
+    return ms_login()
 
 
 def cmd_whoami(a):
@@ -1372,12 +1379,11 @@ def main():
     s.add_argument("choice")
     s = sub.add_parser("accounts", help="calendar accounts")
     s.add_argument("--json", action="store_true")
-    s = sub.add_parser("account", help="account add microsoft [--personal] | google | macos; account remove ID; "
+    s = sub.add_parser("account", help="account add microsoft | google | macos; account remove ID; "
                                        "account google-client FILE.json")
     s.add_argument("action", choices=["add", "remove", "google-client"])
     s.add_argument("provider", nargs="?", help="microsoft | google | macos (add), FILE (google-client)")
     s.add_argument("id", nargs="?")
-    s.add_argument("--personal", action="store_true", help="Microsoft personal account (outlook.com, hotmail)")
     sub.add_parser("login")
     sub.add_parser("logout")
     sub.add_parser("whoami")

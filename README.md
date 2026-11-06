@@ -145,7 +145,7 @@ meet recover              # recordings never processed (crash, reboot)
 meet process <folder>     # process a recording again
 meet import <file> [-t "title"] [--at "YYYY-MM-DD HH:MM"]   # process an existing audio file
 meet accounts                                  # calendar accounts
-meet account add microsoft [--personal] | google | macos
+meet account add microsoft | google | macos
 meet account remove <id>
 meet events [YYYY-MM-DD]                       # events of a day from every account
 meet candidates <folder> / meet choose <folder> <n|none>
@@ -159,8 +159,7 @@ account (secondary and shared ones too) and shows an event only once if it appea
 
 | Your calendar | How to add it |
 |---|---|
-| Microsoft 365 for work or school | **+ Microsoft work**: sign in with the code (already in the clipboard) |
-| Outlook.com, Hotmail, Live | **+ Microsoft personal** |
+| Microsoft 365 (work or school), Outlook.com, Hotmail, Live | **+ Microsoft**: sign in with the code (already in the clipboard) |
 | Gmail, Google Workspace | **+ Google**, see below |
 | iCloud, Yahoo, CalDAV, Exchange on-premises, subscribed `.ics` calendars | add them to the macOS Calendar app, then **+ macOS Calendar** |
 | A company that blocks third-party apps on Microsoft 365 | add the account to the macOS Calendar app, or subscribe to its published `.ics` link there |
