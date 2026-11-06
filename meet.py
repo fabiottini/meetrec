@@ -2,7 +2,8 @@
 """meet: record meetings from the CLI, transcribe locally with whisper.cpp, link to Outlook, save to Obsidian.
 
   meet start [-t TITLE]     start recording in background (mic + system audio)
-  meet stop [--no-process]  stop and process (transcript + note)
+  meet stop [--no-process | --discard]   stop and process (transcript + note), or stop and delete
+  meet discard DIR          delete a recording folder
   meet rec [-t TITLE]       foreground: record until Ctrl-C, then process
   meet status               current recording
   meet process DIR          (re)process a recording folder
@@ -201,8 +202,30 @@ def stop_capture():
     return d
 
 
+def discard(d):
+    """delete a recording folder: only real recordings (inside recordings_dir, with meta.json)"""
+    d = Path(d).expanduser().resolve()
+    root_ = Path(C["recordings_dir"]).expanduser().resolve()
+    if d.parent != root_ or not (d / "meta.json").is_file():
+        say(f"not a MeetRec recording folder, not deleted: {d}")
+        return 1
+    cur = read_json(CURRENT) or {}
+    if Path(cur.get("dir", "/nonexistent")).resolve() == d and pid_alive(cur.get("pid", 0)):
+        say("this recording is still running: stop it first (meet stop --discard)")
+        return 1
+    shutil.rmtree(d)
+    say(f"recording deleted: {d}")
+    return 0
+
+
+def cmd_discard(a):
+    return discard(a.dir)
+
+
 def cmd_stop(a):
     d = stop_capture()
+    if d and a.discard:
+        return discard(d)
     if d and not a.no_process:
         if sys.stdin.isatty():
             ask_event(d)
@@ -1373,6 +1396,9 @@ def main():
         s.add_argument("--no-mic", action="store_true", help="system audio only")
     s = sub.add_parser("stop")
     s.add_argument("--no-process", action="store_true")
+    s.add_argument("--discard", action="store_true", help="stop and delete the recording")
+    s = sub.add_parser("discard", help="delete a recording folder (e.g. one listed by meet recover)")
+    s.add_argument("dir")
     sub.add_parser("status")
     s = sub.add_parser("import", help="process an existing audio file (mp3, wav, m4a, …)")
     s.add_argument("file")
@@ -1406,7 +1432,7 @@ def main():
     s.add_argument("date", nargs="?")
     sub.add_parser("mics")
     a = p.parse_args()
-    return {"start": cmd_start, "rec": cmd_rec, "stop": cmd_stop, "status": cmd_status, "process": cmd_process, "import": cmd_import,
+    return {"start": cmd_start, "rec": cmd_rec, "stop": cmd_stop, "discard": cmd_discard, "status": cmd_status, "process": cmd_process, "import": cmd_import,
             "recover": cmd_recover, "candidates": cmd_candidates, "choose": cmd_choose,
             "accounts": cmd_accounts, "now": cmd_now, "account": cmd_account, "login": cmd_login, "logout": cmd_logout, "whoami": cmd_whoami, "events": cmd_events, "mics": cmd_mics}[a.cmd](a)
 

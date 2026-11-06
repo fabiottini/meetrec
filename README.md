@@ -98,19 +98,33 @@ under **Setup…**. The other options (folders, microphone, languages, summary�
 > If you use a menu bar manager (Ice, Bartender…), the icon may end up in the hidden section.
 > Drag it out.
 
-### Build from source
+### Build, install and release with make
 
-You need the Xcode Command Line Tools (`swiftc`).
+You need the Xcode Command Line Tools (`swiftc`); `make docs` also needs `ffmpeg`.
 
 ```sh
 git clone git@gitlab.com:fabiottini/meet-rec-transcribe.git
 cd meet-rec-transcribe
-./build.sh      # creates dist/MeetRec.app and dist/MeetRec.zip
-./install.sh    # build + copy to ~/Applications + open
+make                # list the targets
 ```
 
-After a change, commit `dist/MeetRec.zip` too.
-Each new build has a different signature, so macOS asks for the two permissions again.
+| Command | What it does |
+|---|---|
+| `make build` | builds `dist/MeetRec.app` (Apple Silicon + Intel) and `dist/MeetRec.zip` |
+| `make install` | build, copy to `~/Applications`, open (refuses while a recording is running) |
+| `make install-zip` | installs the committed `dist/MeetRec.zip`, without building |
+| `make open` | opens the installed app |
+| `make cli` | installs the `meet` command (`~/.local/bin/meet`), using the installed app |
+| `make check` | syntax check of `meet.py`, locale keys in every language, `Info.plist` |
+| `make docs` | renders the README images in `docs/` from the app, in English |
+| `make release` | `check` + `build` + `docs`: then commit with `dist/MeetRec.zip` and `docs/` |
+| `make uninstall` | removes the app and the `meet` command (config, tokens and recordings are kept) |
+| `make clean` | removes `dist/MeetRec.app` (the zip stays) |
+
+The usual flow after a change: `make release`, then commit (code, `dist/MeetRec.zip`, `docs/`) on a
+branch, push and open a merge request; after the merge, `make install-zip` on every Mac.
+Each new build has a different signature, so macOS asks for the microphone and system audio
+permissions again.
 
 ## Usage
 
@@ -123,7 +137,8 @@ Each new build has a different signature, so macOS asks for the two permissions 
 | white square + `…` | transcribing |
 
 The menu has: audio levels, start (optionally with a title), stop and process, stop without
-processing, recordings to process, open the last note in Obsidian, recordings folder, log,
+processing, stop and discard (asks for confirmation, deletes the audio), recordings to process
+(each one can be processed or deleted), open the last note in Obsidian, recordings folder, log,
 settings, setup.
 
 ### Call detection
@@ -155,6 +170,8 @@ reads): menu **Import audio file…** (⌘I), drag the file onto the MeetRec ico
 meet start [-t "title"]   # record in the background
 meet status
 meet stop                 # stop, transcribe, find the event, write the note
+meet stop --discard       # stop and delete the recording
+meet discard <folder>     # delete a recording (e.g. from meet recover)
 meet rec                  # in the foreground, Ctrl-C to stop
 meet recover              # recordings never processed (crash, reboot)
 meet process <folder>     # process a recording again
@@ -303,5 +320,6 @@ meet.py                   recording, audio, transcription, calendar, note (also 
 locales/                  UI texts, one JSON file per language
 assets/                   icon (make-icon.swift draws the PNG, AppIcon.icns for the app)
 docs/                     README images (MeetRec --render-docs docs)
-build.sh, install.sh
+Makefile, build.sh, install.sh
+scripts/check_locales.py  used by make check
 ```
