@@ -1069,6 +1069,19 @@ def cmd_logout(a):         # old command: remove every account
     return 0
 
 
+def cmd_now(a):
+    """meetings going on now in every calendar (for the 'call detected' prompt)"""
+    now_ = now()
+    evs = [e for e in all_events(now_ - dt.timedelta(hours=2), now_ + dt.timedelta(minutes=15))
+           if not e["all_day"] and e["_start"] - dt.timedelta(minutes=10) <= now_ <= e["_end"]]
+    if a.json:
+        print(json.dumps([{**plain_event(e), "label": describe(e)} for e in evs], ensure_ascii=False))
+    else:
+        for e in evs:
+            print(describe(e))
+    return 0
+
+
 def cmd_events(a):
     day = dt.date.fromisoformat(a.date) if a.date else dt.date.today()
     s = dt.datetime.combine(day, dt.time(0)).astimezone()
@@ -1387,13 +1400,15 @@ def main():
     sub.add_parser("login")
     sub.add_parser("logout")
     sub.add_parser("whoami")
+    s = sub.add_parser("now", help="meetings going on now in every calendar")
+    s.add_argument("--json", action="store_true")
     s = sub.add_parser("events")
     s.add_argument("date", nargs="?")
     sub.add_parser("mics")
     a = p.parse_args()
     return {"start": cmd_start, "rec": cmd_rec, "stop": cmd_stop, "status": cmd_status, "process": cmd_process, "import": cmd_import,
             "recover": cmd_recover, "candidates": cmd_candidates, "choose": cmd_choose,
-            "accounts": cmd_accounts, "account": cmd_account, "login": cmd_login, "logout": cmd_logout, "whoami": cmd_whoami, "events": cmd_events, "mics": cmd_mics}[a.cmd](a)
+            "accounts": cmd_accounts, "now": cmd_now, "account": cmd_account, "login": cmd_login, "logout": cmd_logout, "whoami": cmd_whoami, "events": cmd_events, "mics": cmd_mics}[a.cmd](a)
 
 
 if __name__ == "__main__":
