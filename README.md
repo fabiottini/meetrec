@@ -26,6 +26,9 @@ to disk while you record, so a crash does not lose it.
 - **Live levels** in the menu: microphone waveform, meters for you and for the others, and the
   input volume.
 - **Automatic gain reduction**: if the microphone clips, the input volume goes down by itself.
+- **Call detection**: when a call starts (another app opens the microphone), a small prompt offers
+  **Record**, with the meeting title if a calendar has it; when the call ends while recording, it
+  offers **Stop and process**.
 - **Mute switch**: mutes the microphone for every app (Teams included) until you switch it off.
 - **Local transcription** with whisper.cpp (large-v3-turbo) and a silence filter. The audio stays on
   your Mac.
@@ -122,6 +125,18 @@ Each new build has a different signature, so macOS asks for the two permissions 
 The menu has: audio levels, start (optionally with a title), stop and process, stop without
 processing, recordings to process, open the last note in Obsidian, recordings folder, log,
 settings, setup.
+
+### Call detection
+
+When another app keeps the microphone open for a few seconds (Teams, Zoom, Meet in a browser,
+FaceTime, Slack…), a small prompt appears in the top right corner: "Call in progress on Microsoft
+Teams", with the meeting title when one of your calendars has it, and **Record** / **Ignore**.
+When that app releases the microphone while MeetRec is recording, the prompt offers **Stop and
+process** / **Keep recording**. The prompt goes away by itself after a minute.
+
+It uses the macOS per-process microphone state: nothing is recorded until you press Record, and
+dictation and Siri are ignored. Turn it off in Settings ("Offer to record when a call starts",
+`call_prompt` in config.json). `meet now` lists the meetings going on now in every calendar.
 
 ### Import an audio file
 
@@ -232,6 +247,7 @@ microphone: 16 kHz, narrow band, often very quiet. Whisper makes many more mista
 | `summary` | `true` | |
 | `summary_cmd` | `["claude","-p","--model","sonnet"]` | the prompt is sent on stdin |
 | `keep_raw` | `false` | also keeps the raw PCM |
+| `call_prompt` | `true` | offer to record when a call starts, and to stop when it ends |
 | `keep_tracks` | `false` | also keeps `mic.m4a` and `system.m4a` after processing; otherwise only `mix.m4a` is kept |
 | `whisper_bin`, `whisper_model`, `vad_model` | found automatically | whisper.cpp and models (`~/Library/Application Support/MeetRec/models`) |
 | `whisper_threads` | `4` | transcription threads: keeps the Mac responsive |

@@ -159,6 +159,7 @@ final class Settings: ObservableObject {
     @Published var summary = true
     @Published var keepRaw = false
     @Published var keepTracks = false
+    @Published var callPrompt = true
     @Published var mics: [(name: String, id: String)] = []
     @Published var account = "…"
     @Published var loginMessage = ""
@@ -182,6 +183,7 @@ final class Settings: ObservableObject {
         summary = raw["summary"] as? Bool ?? true
         keepRaw = raw["keep_raw"] as? Bool ?? false
         keepTracks = raw["keep_tracks"] as? Bool ?? false
+        callPrompt = raw["call_prompt"] as? Bool ?? true
         launchAtLogin = SMAppService.mainApp.status == .enabled
         saved = false
         loadMics()
@@ -214,6 +216,7 @@ final class Settings: ObservableObject {
         raw["summary"] = summary
         raw["keep_raw"] = keepRaw
         raw["keep_tracks"] = keepTracks
+        raw["call_prompt"] = callPrompt
         if let d = try? JSONSerialization.data(withJSONObject: raw, options: [.prettyPrinted, .sortedKeys]) {
             try? FileManager.default.createDirectory(atPath: "\(home)/.config/meetrec", withIntermediateDirectories: true)
             try? d.write(to: URL(fileURLWithPath: configFile), options: .atomic)
@@ -271,6 +274,7 @@ struct SettingsView: View {
                 }
                 Toggle(T("also_keep_raw_audio_much_more_space"), isOn: $s.keepRaw)
                 Toggle(T("keep_separate_tracks"), isOn: $s.keepTracks)
+                Toggle(T("call_prompt_setting"), isOn: $s.callPrompt)
             }
             Section("Obsidian") {
                 PathField(label: "Vault", path: $s.vault)
@@ -327,6 +331,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var muteTick = 0
     let settings = Settings()
     let setup = SetupModel()
+    let calls = CallWatcher()
     var setupWindow: NSWindow?
     let levels = LevelController()
     lazy var levelItem: NSMenuItem = {
@@ -355,6 +360,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
         if !MicMute.shared.enabled { MicMute.shared.restoreAll() }
+        startCallWatcher()
         NotificationCenter.default.addObserver(forName: .init("MeetRecOpenSetup"), object: nil, queue: .main) { [weak self] _ in
             self?.openSetup()
         }
@@ -587,6 +593,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    // MARK: call detection: offer "Record" when a call starts, "Stop" when it ends
+
+    func callPromptEnabled() -> Bool {
+        let c = (try? JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: configFile)))) as? [String: Any]
+        return c?["call_prompt"] as? Bool ?? true
+    }
+
+    func startCallWatcher() {
+        calls.ownPIDs = {
+            guard let d = FileManager.default.contents(atPath: stateFile),
+                  let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+                  let pid = j["pid"] as? Int else { return [] }
+            return [pid_t(pid)]
+        }
+        calls.onCallStart = { [weak self] app in
+            guard let self, self.callPromptEnabled(), self.current()?.alive != true, !self.processing else { return }
+            let show = { (event: String) in
+                CallPrompt.shared.show(title: T("call_detected", ["app": app]),
+                                       subtitle: event.isEmpty ? T("call_detected_sub") : event,
+                                       primary: T("record"), secondary: T("ignore"),
+                                       onPrimary: { self.startRecording(title: nil) })
+            }
+            show("")
+            self.runMeet3(["now", "--json"]) { out in    // add the meeting title when a calendar has it
+                let evs = out.split(separator: "\n").last.flatMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) } as? [[String: Any]] ?? []
+                if let e = evs.first, let subj = e["subject"] as? String, self.current()?.alive != true, self.calls.inCall {
+                    show(subj)
+                }
+            }
+        }
+        calls.onCallEnd = { [weak self] app in
+            guard let self, self.callPromptEnabled(), self.current()?.alive == true else { return }
+            CallPrompt.shared.show(title: T("call_ended", ["app": app]), subtitle: T("call_ended_sub"),
+                                   primary: T("stop_and_process"), secondary: T("keep_recording"),
+                                   onPrimary: { self.stopAndProcess() })
+        }
+        calls.start()
+    }
+
+    func runMeet3(_ args: [String], then: @escaping (String) -> Void) { runMeet(args) { _, out in then(out) } }
+
     @objc func toggleMute() {
         MicMute.shared.enabled.toggle()
         MicMute.shared.tick(micUID: micUID())
@@ -598,6 +645,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func startRecording(title: String?) {
+        CallPrompt.shared.hide()
         var args = ["start"]
         if let t = title { args += ["-t", t] }
         runMeet(args) { status, out in

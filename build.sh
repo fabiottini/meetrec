@@ -21,7 +21,7 @@ echo "==> build"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 universal "$APP/Contents/MacOS/meetrec-capture" capture/main.swift shared/MicVolume.swift
 universal "$APP/Contents/MacOS/meetrec-events" helpers/events.swift
-universal "$APP/Contents/MacOS/MeetRec" menubar/main.swift menubar/LevelPanel.swift menubar/Setup.swift menubar/MicMute.swift shared/MicVolume.swift
+universal "$APP/Contents/MacOS/MeetRec" menubar/main.swift menubar/LevelPanel.swift menubar/Setup.swift menubar/MicMute.swift menubar/CallWatcher.swift shared/MicVolume.swift
 cp menubar/Info.plist "$APP/Contents/Info.plist"
 cp assets/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cp meet.py "$APP/Contents/Resources/meet.py"
