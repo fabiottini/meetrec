@@ -273,6 +273,17 @@ final class LevelController {
         view.setMuted(MicMute.shared.enabled, unsupported: MicMute.shared.unsupported)
     }
 
+    /// recording folder printed by meet ("… -> /path" or "recording folder -> /path")
+    static func dirFrom(_ out: String, marker: String) -> String? {
+        for line in out.split(separator: "\n").reversed() {
+            if let r = line.range(of: marker) {
+                let d = String(line[r.upperBound...]).trimmingCharacters(in: .whitespaces)
+                if FileManager.default.fileExists(atPath: d) { return d }
+            }
+        }
+        return nil
+    }
+
     static func readLevels(_ dir: String) -> [String: (Double, Double)] {
         guard let s = try? String(contentsOfFile: dir + "/levels", encoding: .utf8) else { return [:] }
         var out: [String: (Double, Double)] = [:]

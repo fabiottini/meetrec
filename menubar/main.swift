@@ -162,7 +162,6 @@ final class Settings: ObservableObject {
     @Published var mics: [(name: String, id: String)] = []
     @Published var account = "…"
     @Published var loginMessage = ""
-    @Published var loggingIn = false
     @Published var launchAtLogin = SMAppService.mainApp.status == .enabled
     @Published var saved = false
 
@@ -229,31 +228,6 @@ final class Settings: ObservableObject {
         launchAtLogin = SMAppService.mainApp.status == .enabled
     }
 
-    func login() {
-        loggingIn = true
-        loginMessage = T("starting_microsoft_login")
-        runMeet(["login"], onLine: { line in
-            // MSAL: "To sign in, use a web browser to open the page https://... and enter the code XXXX to authenticate."
-            if let urlR = line.range(of: #"https://\S+"#, options: .regularExpression),
-               let codeR = line.range(of: #"code ([A-Z0-9]+)"#, options: .regularExpression) {
-                let url = String(line[urlR])
-                let code = String(line[codeR].dropFirst(5))
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(code, forType: .string)
-                self.loginMessage = T("login_code_copied", ["code": code])
-                if let u = URL(string: url) { NSWorkspace.shared.open(u) }
-            }
-        }) { status, out in
-            self.loggingIn = false
-            self.loginMessage = status == 0 ? T("logged_in") :
-                T("login_failed") + (out.split(separator: "\n").last.map(String.init) ?? "")
-            self.refreshAccount()
-        }
-    }
-
-    func logout() {
-        runMeet(["logout"]) { _, _ in self.loginMessage = ""; self.refreshAccount() }
-    }
 }
 
 struct PathField: View {
@@ -305,13 +279,9 @@ struct SettingsView: View {
                 TextField(T("frontmatter_context"), text: $s.context)
                 Toggle(T("automatic_summary_with_claude_text_only"), isOn: $s.summary)
             }
-            Section(T("outlook_calendar")) {
-                LabeledContent("Account", value: s.account)
-                HStack {
-                    Button(s.loggingIn ? T("waiting_for_the_browser") : T("microsoft_login")) { s.login() }.disabled(s.loggingIn)
-                    Button("Logout") { s.logout() }
-                }
-                if !s.loginMessage.isEmpty { Text(s.loginMessage).font(.callout).textSelection(.enabled) }
+            Section(T("cal_title")) {
+                Text(s.account.isEmpty ? T("cal_none") : s.account).textSelection(.enabled)
+                Button(T("cal_manage")) { NotificationCenter.default.post(name: .init("MeetRecOpenSetup"), object: nil) }
             }
             Section(T("system")) {
                 Toggle(T("open_meetrec_at_login"), isOn: Binding(get: { s.launchAtLogin }, set: { s.setLaunchAtLogin($0) }))
@@ -338,6 +308,13 @@ struct SettingsView: View {
 }
 
 // MARK: - app
+
+/// target for the radio buttons of the "which meeting?" dialog (NSAlert has no radio group)
+final class RadioTarget: NSObject {
+    static let shared = RadioTarget()
+    var onClick: ((NSButton) -> Void)?
+    @objc func clicked(_ b: NSButton) { onClick?(b) }
+}
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var item: NSStatusItem!
@@ -378,6 +355,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
         if !MicMute.shared.enabled { MicMute.shared.restoreAll() }
+        NotificationCenter.default.addObserver(forName: .init("MeetRecOpenSetup"), object: nil, queue: .main) { [weak self] _ in
+            self?.openSetup()
+        }
         refresh()
         loadRecover()
         // used to take README screenshots, and handy from a terminal: open -a MeetRec --args --settings
@@ -594,7 +574,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         a.window.initialFirstResponder = f
         guard a.runModal() == .alertFirstButtonReturn else { return }
         let t = f.stringValue.trimmingCharacters(in: .whitespaces)
-        runPipeline(["import", url.path] + (t.isEmpty ? [] : ["-t", t]))
+        processing = true
+        processingStep = T("import_copying")
+        refresh()
+        runMeet(["import", url.path, "--no-process"] + (t.isEmpty ? [] : ["-t", t])) { status, out in
+            self.processing = false
+            if status == 0, let d = LevelController.dirFrom(out, marker: "recording folder -> ") {
+                self.chooseEventThenProcess(d)
+            } else {
+                notify(T("processing_failed"), out.split(separator: "\n").last.map(String.init) ?? "")
+            }
+        }
     }
 
     @objc func toggleMute() {
@@ -625,10 +615,61 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    @objc func stopAndProcess() { runPipeline(["stop"]) }
+    /// stop, then ask which calendar event it was (from every account), then process
+    @objc func stopAndProcess() {
+        runMeet(["stop", "--no-process"]) { _, out in
+            self.refresh()
+            if let d = LevelController.dirFrom(out, marker: "-> ") { self.chooseEventThenProcess(d) }
+        }
+    }
+
+    func chooseEventThenProcess(_ dir: String) {
+        processing = true
+        processingStep = T("cal_looking")
+        refresh()
+        runMeet(["candidates", dir, "--json"]) { _, out in
+            self.processing = false
+            let cands = out.split(separator: "\n").last.flatMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) } as? [[String: Any]] ?? []
+            guard !cands.isEmpty else { self.runPipeline(["process", dir]); return }
+            let a = NSAlert()
+            a.messageText = T("cal_which_meeting")
+            a.informativeText = T("cal_which_meeting_info")
+            let stack = NSStackView()
+            stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 6
+            var radios: [NSButton] = []
+            let pick = { (b: NSButton) in radios.forEach { $0.state = $0 === b ? .on : .off } }
+            for (i, c) in cands.enumerated() {
+                let r = NSButton(radioButtonWithTitle: c["label"] as? String ?? "?", target: nil, action: nil)
+                r.tag = i + 1
+                radios.append(r)
+            }
+            let none = NSButton(radioButtonWithTitle: T("cal_none_of_these"), target: nil, action: nil)
+            none.tag = 0
+            radios.append(none)
+            for r in radios {
+                r.target = RadioTarget.shared; r.action = #selector(RadioTarget.clicked(_:))
+                stack.addArrangedSubview(r)
+            }
+            RadioTarget.shared.onClick = pick
+            radios[0].state = .on
+            stack.frame = NSRect(x: 0, y: 0, width: 460, height: CGFloat(radios.count) * 24)
+            a.accessoryView = stack
+            a.addButton(withTitle: T("cal_use_this")); a.addButton(withTitle: T("cal_decide_later"))
+            NSApp.activate(ignoringOtherApps: true)
+            guard a.runModal() == .alertFirstButtonReturn else {
+                notify("MeetRec", T("cal_saved_for_later"))
+                self.loadRecover()
+                return
+            }
+            let tag = radios.first { $0.state == .on }?.tag ?? 1
+            self.runMeet2(["choose", dir, tag == 0 ? "none" : "\(tag)"]) { self.runPipeline(["process", dir]) }
+        }
+    }
+
+    func runMeet2(_ args: [String], then: @escaping () -> Void) { runMeet(args) { _, _ in then() } }
     @objc func stopOnly() { runMeet(["stop", "--no-process"]) { _, _ in self.refresh(); self.loadRecover() } }
     @objc func processDir(_ sender: NSMenuItem) {
-        if let d = sender.representedObject as? String { runPipeline(["process", d]) }
+        if let d = sender.representedObject as? String { chooseEventThenProcess(d) }
     }
 
     func runPipeline(_ args: [String]) {
@@ -666,7 +707,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc func openSetup() {
-        setup.onLogin = { [weak self] in self?.openSettings(); self?.settings.login() }
         setup.refresh()
         if setupWindow == nil {
             let w = NSWindow(contentViewController: NSHostingController(rootView: SetupView(m: setup) { [weak self] in

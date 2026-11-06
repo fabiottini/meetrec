@@ -18,5 +18,7 @@
   </dict></array>
   <key>LSUIElement</key><true/>
   <key>NSMicrophoneUsageDescription</key><string>MeetRec registra il tuo microfono durante i meeting.</string>
+  <key>NSCalendarsFullAccessUsageDescription</key><string>MeetRec reads your calendars to find the meeting you are recording.</string>
+  <key>NSCalendarsUsageDescription</key><string>MeetRec reads your calendars to find the meeting you are recording.</string>
   <key>NSScreenCaptureUsageDescription</key><string>MeetRec registra l'audio di sistema (gli altri partecipanti).</string>
 </dict></plist>

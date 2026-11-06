@@ -6,3 +6,4 @@ capture/meetrec-capture
 *.s16
 .DS_Store
 dist/MeetRec.app/
+helpers/meetrec-events

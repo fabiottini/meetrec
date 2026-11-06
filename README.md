@@ -4,7 +4,8 @@
 
 Records meetings on your Mac (your voice and the other participants' voices) and transcribes them
 **locally** with [whisper.cpp](https://github.com/ggml-org/whisper.cpp). It links each recording to
-the Outlook calendar event and saves a note in Obsidian, with an optional summary.
+the calendar event (Microsoft, Google, iCloud… as many accounts as you want) and saves a note in
+Obsidian, with an optional summary.
 
 <p align="center"><img src="docs/menubar.png" width="250" alt="Menu bar icon: ready and recording"></p>
 
@@ -29,7 +30,8 @@ to disk while you record, so a crash does not lose it.
 - **Local transcription** with whisper.cpp (large-v3-turbo) and a silence filter. The audio stays on
   your Mac.
 - **Who is speaking**: your words and the others' words are kept apart, thanks to the two tracks.
-- **Outlook calendar**: title, attendees, agenda and link of the current event.
+- **Every calendar you use**: Microsoft 365 and Outlook.com, Google, and anything in the macOS
+  Calendar app, with as many accounts as you want. When you stop, MeetRec asks which meeting it was.
 - **Summary** with Claude, optional and text only: key points, decisions, action items, open
   questions.
 - **Obsidian note** with frontmatter, linked people and a timestamped transcript.
@@ -83,7 +85,7 @@ macOS 15 or later).
 | Transcription model | downloads whisper large-v3-turbo (1.6 GB) and the silence filter; if Vibe is installed, copies them from Vibe |
 | Microphone and system audio permissions | asks macOS (for system audio, reopen the app afterwards) |
 | Obsidian vault | choose the folder |
-| Outlook calendar (optional) | Microsoft login; the code is already in the clipboard |
+| Calendars (optional) | add Microsoft, Google and macOS Calendar accounts, see [Calendars](#calendars) |
 | Claude Code (optional) | needed for the summary; without it the note has only the transcript |
 | `meet` command (optional) | installs `~/.local/bin/meet`, which uses the app |
 
@@ -142,10 +144,38 @@ meet rec                  # in the foreground, Ctrl-C to stop
 meet recover              # recordings never processed (crash, reboot)
 meet process <folder>     # process a recording again
 meet import <file> [-t "title"] [--at "YYYY-MM-DD HH:MM"]   # process an existing audio file
-meet login | logout | whoami
-meet events [YYYY-MM-DD]  # calendar events of a day
+meet accounts                                  # calendar accounts
+meet account add microsoft [--personal] | google | macos
+meet account remove <id>
+meet events [YYYY-MM-DD]                       # events of a day from every account
+meet candidates <folder> / meet choose <folder> <n|none>
 meet mics                 # available microphones
 ```
+
+## Calendars
+
+Add accounts in **Setup > Calendars**, as many as you want. MeetRec reads **every calendar** of each
+account (secondary and shared ones too) and shows an event only once if it appears in two places.
+
+| Your calendar | How to add it |
+|---|---|
+| Microsoft 365 for work or school | **+ Microsoft work**: sign in with the code (already in the clipboard) |
+| Outlook.com, Hotmail, Live | **+ Microsoft personal** |
+| Gmail, Google Workspace | **+ Google**, see below |
+| iCloud, Yahoo, CalDAV, Exchange on-premises, subscribed `.ics` calendars | add them to the macOS Calendar app, then **+ macOS Calendar** |
+| A company that blocks third-party apps on Microsoft 365 | add the account to the macOS Calendar app, or subscribe to its published `.ics` link there |
+
+**Google** needs your own OAuth client, once (Google does not allow calendar access with a sign-in
+code): in [Google Cloud Console](https://console.cloud.google.com/apis/credentials) create a
+project, enable the **Google Calendar API**, set up the consent screen (External; add your
+addresses as test users, or publish the app so logins do not expire after 7 days) and create an
+**OAuth client ID** of type **Desktop app**. Download its JSON and choose it when Setup asks.
+After that, each **+ Google** opens the browser to sign in with one more account.
+
+**When you stop a recording** (or import a file), MeetRec lists the events found in every calendar
+at that time, the most likely one selected, plus "None of these". Your choice sets the note title,
+attendees and agenda. "Decide later" keeps the recording in **To process**. From the command line,
+`meet stop` asks the same question in the terminal.
 
 ## Transcription quality: the microphone matters
 
@@ -174,8 +204,9 @@ microphone: 16 kHz, narrow band, often very quiet. Whisper makes many more mista
    `others_label`. It drops:
    - text that whisper makes up on silent tracks (loudness check);
    - duplicate sentences that the microphone picks up from the speakers.
-4. **Calendar**. Microsoft Graph `calendarView`: it picks the event that overlaps the recording
-   the most.
+4. **Calendar**. Events of every account that overlap the recording (or start within 10 minutes
+   of it); you pick one when you stop. If you do not pick (`meet process` alone), it takes the
+   event that overlaps the most.
 5. **Summary** (optional). `claude -p` receives **only the text** of the transcript.
 6. **Note**. `<vault>/<meetings_dir>/YYYY-MM/YYYY-MM-DD - <title>.md` with frontmatter
    (`type: meeting`, `context`, `summary`, `people`, `date`, times, links to the recording and
@@ -206,11 +237,12 @@ microphone: 16 kHz, narrow band, often very quiet. Whisper makes many more mista
 | `whisper_bin`, `whisper_model`, `vad_model` | found automatically | whisper.cpp and models (`~/Library/Application Support/MeetRec/models`) |
 | `whisper_threads` | `4` | transcription threads: keeps the Mac responsive |
 | `ffmpeg`, `vibe_bin`, `vibe_model` | found automatically | Vibe is only a fallback |
-| `ms_client_id`, `ms_authority` | public client, `organizations` | device code login, `Calendars.Read` only |
+| `calendar_accounts` | `[]` | managed by Setup or `meet account …` |
+| `ms_client_id`, `ms_authority` | public client, `organizations` | Microsoft device code login, read-only calendar scopes |
 | `timezone` | `Europe/Rome` | |
 
-The Microsoft token is in `~/.config/meetrec/token.json` (mode 0600). The login uses only the
-Python standard library.
+Tokens are in `~/.config/meetrec/tokens/<account>.json` (mode 0600). Logins use only the Python
+standard library.
 
 ## Languages
 
