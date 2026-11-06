@@ -4,6 +4,7 @@
 import AppKit
 import ServiceManagement
 import SwiftUI
+import UniformTypeIdentifiers
 
 let home = FileManager.default.homeDirectoryForCurrentUser.path
 // meet.py and the recorder ship inside the app; outside a bundle (dev runs) fall back to the CLI wrapper
@@ -521,6 +522,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let n = lastNote {
             _ = add(T("open_last_note") + (n as NSString).lastPathComponent, #selector(openLastNote))
         }
+        _ = add(T("import_audio_file"), processing ? nil : #selector(importAudio), key: "i")
         _ = add(T("open_recordings_folder"), #selector(openRecordings))
         if !recover.isEmpty {
             let sub = NSMenu()
@@ -558,6 +560,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let t = f.stringValue.trimmingCharacters(in: .whitespaces)
             startRecording(title: t.isEmpty ? nil : t)
         }
+    }
+
+    // MARK: import an existing audio file (mp3, wav, m4a…): menu, Finder "Open With", drop on the app icon
+
+    @objc func importAudio() {
+        let p = NSOpenPanel()
+        p.allowedContentTypes = [.audio]
+        p.allowsMultipleSelection = false
+        p.message = T("import_panel_message")
+        NSApp.activate(ignoringOtherApps: true)
+        if p.runModal() == .OK, let u = p.url { importFile(u) }
+    }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        if let u = urls.first(where: { UTType(filenameExtension: $0.pathExtension)?.conforms(to: .audio) ?? false }) {
+            importFile(u)
+        }
+    }
+
+    func importFile(_ url: URL) {
+        guard !processing else {
+            notify("MeetRec", T("import_busy"))
+            return
+        }
+        let a = NSAlert()
+        a.messageText = T("import_title", ["file": url.lastPathComponent])
+        a.informativeText = T("import_title_info")
+        let f = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
+        a.accessoryView = f
+        a.addButton(withTitle: T("import_button")); a.addButton(withTitle: T("cancel"))
+        NSApp.activate(ignoringOtherApps: true)
+        a.window.initialFirstResponder = f
+        guard a.runModal() == .alertFirstButtonReturn else { return }
+        let t = f.stringValue.trimmingCharacters(in: .whitespaces)
+        runPipeline(["import", url.path] + (t.isEmpty ? [] : ["-t", t]))
     }
 
     @objc func toggleMute() {

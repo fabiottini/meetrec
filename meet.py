@@ -6,6 +6,7 @@
   meet rec [-t TITLE]       foreground: record until Ctrl-C, then process
   meet status               current recording
   meet process DIR          (re)process a recording folder
+  meet import FILE [-t TITLE] [--at "YYYY-MM-DD HH:MM"]   process an existing audio file (mp3, wav, m4a…)
   meet recover              list recordings never processed (e.g. after a crash)
   meet login / logout / whoami   Microsoft login for the calendar (Calendars.Read)
   meet events [DATE]        list calendar events of a day (test)
@@ -715,10 +716,18 @@ def safe_filename(s):
     return re.sub(r"\s+", " ", s).strip()[:100] or "meeting"
 
 
+def invite_agenda(event):
+    """Text written in the invite, without the Teams/Zoom/Meet join block (links, meeting ID, passcode)."""
+    t = (event or {}).get("bodyPreview") or ""
+    t = re.split(r"_{8,}|Microsoft Teams (?:meeting|Need help)|Riunione di Microsoft Teams|Join Zoom Meeting|"
+                 r"Partecipa alla riunione Zoom|Join with Google Meet|Partecipa con Google Meet", t, maxsplit=1)[0]
+    return re.sub(r"\s+", " ", t).strip()
+
+
 def summarize(title, event, transcript_text):
     if not C["summary"] or not shutil.which(C["summary_cmd"][0]):
         return None, None
-    agenda = (event or {}).get("bodyPreview", "")[:1500]
+    agenda = invite_agenda(event)[:1500]
     prompt = f"""Sei l'assistente di {C['me']}. Qui sotto c'è la trascrizione automatica di un meeting.
 Titolo dal calendario: {title}
 Agenda dall'invito: {agenda or '(nessuna)'}
@@ -788,7 +797,9 @@ def write_note(d, meta, event, turns, single_track, summary_line, summary_body):
     fm.append("people:" + ("" if people else " []"))
     fm += [f"  - {yq(p)}" for p in people]
     fm += ["tags: []", f"time: {yq(f'{rec_start:%H:%M}-{rec_end:%H:%M}')}", f"duration_min: {dur}",
-           f"recording: {yq(str(d / 'mix.m4a'))}", "source: meetrec"]
+           f"recording: {yq(str(d / 'mix.m4a'))}", "source: " + ("meetrec-import" if meta.get("source_file") else "meetrec")]
+    if meta.get("source_file"):
+        fm.append(f"source_file: {yq(meta['source_file'])}")
     if event:
         fm += [f"calendar_subject: {yq(event.get('subject', ''))}",
                "calendar_time: " + yq(f"{event['_start']:%H:%M}-{event['_end']:%H:%M}"),
@@ -803,13 +814,15 @@ def write_note(d, meta, event, turns, single_track, summary_line, summary_body):
                  f"> **{event.get('subject', '')}**, {event['_start']:%d/%m/%Y %H:%M}-{event['_end']:%H:%M}"
                  f" ([apri in Outlook]({event.get('webLink', '')}))",
                  f"> Organizzatore: {org}", f"> Invitati: {att}"]
-        agenda = (event.get("bodyPreview") or "").strip()
+        agenda = invite_agenda(event)
         if agenda:
             body += ["> ", "> **Agenda dall'invito:** " + re.sub(r"\s*\n\s*", " ", agenda)[:1200]]
         body.append("")
     else:
         body += ["_Nessun evento di calendario trovato per questo orario._", ""]
     body += [f"Registrazione: `{d / 'mix.m4a'}` ({dur} min, dalle {rec_start:%H:%M} alle {rec_end:%H:%M}).", ""]
+    if meta.get("source_file"):
+        body += [f"Importata dal file `{meta['source_file']}`.", ""]
     if summary_body:
         body += ["## Riassunto", "", "_Generato automaticamente dalla trascrizione: da verificare._", "",
                  summary_body, ""]
@@ -870,6 +883,47 @@ def process(d):
     return 0
 
 
+def file_start_time(src, duration):
+    """When the audio was recorded: creation_time tag if present, else file mtime minus duration."""
+    r = subprocess.run([C["ffmpeg"], "-hide_banner", "-i", str(src)], capture_output=True, text=True)
+    m = re.search(r"creation_time\s*:\s*(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)", r.stderr)
+    if m:
+        t = dt.datetime.fromisoformat(m[1]).replace(tzinfo=dt.timezone.utc).astimezone()
+        if t.year > 2000:
+            return t, "creation_time"
+    end = dt.datetime.fromtimestamp(src.stat().st_mtime).astimezone()
+    return end - dt.timedelta(seconds=duration), "file date"
+
+
+def cmd_import(a):
+    src = Path(a.file).expanduser().resolve()
+    if not src.is_file():
+        say(f"file not found: {src}")
+        return 1
+    secs = probe_duration(src)
+    if secs <= 0:
+        say(f"not an audio file ffmpeg can read: {src}")
+        return 1
+    if a.at:
+        start, how = dt.datetime.fromisoformat(a.at).astimezone(), "--at"
+    else:
+        start, how = file_start_time(src, secs)
+    say(f"importing {src.name}: {secs / 60:.0f} min, recorded {start:%Y-%m-%d %H:%M} ({how})")
+    d = Path(C["recordings_dir"]) / f"{start:%Y-%m-%d_%H%M%S}-import"
+    i = 2
+    while d.exists():
+        d = Path(C["recordings_dir"]) / f"{start:%Y-%m-%d_%H%M%S}-import{i}"
+        i += 1
+    d.mkdir(parents=True)
+    # the original stays untouched: keep an m4a copy next to the other recordings
+    ff("-i", str(src), "-vn", "-c:a", "aac", "-b:a", "96k", str(d / "mix.m4a"))
+    write_json(d / "meta.json", {
+        "started_at": start.isoformat(timespec="seconds"),
+        "stopped_at": (start + dt.timedelta(seconds=secs)).isoformat(timespec="seconds"),
+        "title": a.title, "language": a.lang or C["language"], "source_file": str(src)})
+    return process(d)
+
+
 def cmd_process(a):
     return process(a.dir)
 
@@ -927,6 +981,11 @@ def main():
     s = sub.add_parser("stop")
     s.add_argument("--no-process", action="store_true")
     sub.add_parser("status")
+    s = sub.add_parser("import", help="process an existing audio file (mp3, wav, m4a, …)")
+    s.add_argument("file")
+    s.add_argument("-t", "--title", help="title (default: from the Outlook event at the file time)")
+    s.add_argument("--at", help='when it was recorded, "YYYY-MM-DD HH:MM" (default: from the file)')
+    s.add_argument("-l", "--lang", help="language, default from config")
     s = sub.add_parser("process")
     s.add_argument("dir")
     s = sub.add_parser("recover")
@@ -938,7 +997,7 @@ def main():
     s.add_argument("date", nargs="?")
     sub.add_parser("mics")
     a = p.parse_args()
-    return {"start": cmd_start, "rec": cmd_rec, "stop": cmd_stop, "status": cmd_status, "process": cmd_process,
+    return {"start": cmd_start, "rec": cmd_rec, "stop": cmd_stop, "status": cmd_status, "process": cmd_process, "import": cmd_import,
             "recover": cmd_recover, "login": cmd_login, "logout": cmd_logout, "whoami": cmd_whoami, "events": cmd_events, "mics": cmd_mics}[a.cmd](a)
 
 
