@@ -181,6 +181,7 @@ meet account add microsoft | google | macos
 meet account remove <id>
 meet events [YYYY-MM-DD]                       # events of a day from every account
 meet candidates <folder> / meet choose <folder> <n|none>
+meet choose <folder> manual --title "…" [--start ISO --end ISO --people "a, b" --agenda "…"]
 meet mics                 # available microphones
 ```
 
@@ -204,7 +205,11 @@ addresses as test users, or publish the app so logins do not expire after 7 days
 After that, each **+ Google** opens the browser to sign in with one more account.
 
 **When you stop a recording** (or import a file), MeetRec lists the events found in every calendar
-at that time, the most likely one selected, plus "None of these". Your choice sets the note title,
+at that time, the most likely one selected, plus "None of these" and "Something else: I'll write
+it…". The last one opens a form for a meeting that is in no calendar: title, day, start and end
+(prefilled with the recording times), attendees (names or emails, comma separated) and an optional
+agenda. The note then uses them like a calendar event (title, day, linked people, summary). The
+same choice appears when no calendar has anything at that time. Your choice sets the note title,
 attendees and agenda. "Decide later" keeps the recording in **To process**. From the command line,
 `meet stop` asks the same question in the terminal.
 
