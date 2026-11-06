@@ -121,6 +121,18 @@ The menu has: audio levels, start (optionally with a title), stop and process, s
 processing, recordings to process, open the last note in Obsidian, recordings folder, log,
 settings, setup.
 
+### Import an audio file
+
+You can also process a file you already have (mp3, wav, m4a, aac, flac, ogg… anything ffmpeg
+reads): menu **Import audio file…** (⌘I), drag the file onto the MeetRec icon in Finder, use
+**Open With > MeetRec**, or `meet import <file>`.
+
+- The meeting time, used to find the calendar event, comes from the file: its recording date if
+  it has one, otherwise its modification date minus the duration. Set it with
+  `--at "YYYY-MM-DD HH:MM"`.
+- An imported file is one track, so the transcript does not tell you and the others apart.
+- The original file is not changed; MeetRec keeps a `mix.m4a` copy with the other recordings.
+
 ### Command line
 ```
 meet start [-t "title"]   # record in the background
@@ -129,6 +141,7 @@ meet stop                 # stop, transcribe, find the event, write the note
 meet rec                  # in the foreground, Ctrl-C to stop
 meet recover              # recordings never processed (crash, reboot)
 meet process <folder>     # process a recording again
+meet import <file> [-t "title"] [--at "YYYY-MM-DD HH:MM"]   # process an existing audio file
 meet login | logout | whoami
 meet events [YYYY-MM-DD]  # calendar events of a day
 meet mics                 # available microphones
