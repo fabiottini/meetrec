@@ -693,10 +693,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         runMeet(["candidates", dir, "--json"]) { _, out in
             self.processing = false
             let cands = out.split(separator: "\n").last.flatMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) } as? [[String: Any]] ?? []
-            guard !cands.isEmpty else { self.runPipeline(["process", dir]); return }
             let a = NSAlert()
-            a.messageText = T("cal_which_meeting")
-            a.informativeText = T("cal_which_meeting_info")
+            a.messageText = cands.isEmpty ? T("cal_no_event_found") : T("cal_which_meeting")
+            a.informativeText = cands.isEmpty ? T("cal_no_event_info") : T("cal_which_meeting_info")
             let stack = NSStackView()
             stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 6
             var radios: [NSButton] = []
@@ -706,7 +705,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 r.tag = i + 1
                 radios.append(r)
             }
-            let none = NSButton(radioButtonWithTitle: T("cal_none_of_these"), target: nil, action: nil)
+            let manual = NSButton(radioButtonWithTitle: T("cal_write_myself"), target: nil, action: nil)
+            manual.tag = -1
+            radios.append(manual)
+            let none = NSButton(radioButtonWithTitle: cands.isEmpty ? T("cal_no_event") : T("cal_none_of_these"), target: nil, action: nil)
             none.tag = 0
             radios.append(none)
             for r in radios {
@@ -725,8 +727,82 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 return
             }
             let tag = radios.first { $0.state == .on }?.tag ?? 1
+            if tag == -1 {
+                self.askManualEvent(dir)
+                return
+            }
             self.runMeet2(["choose", dir, tag == 0 ? "none" : "\(tag)"]) { self.runPipeline(["process", dir]) }
         }
+    }
+
+    /// form for a meeting that is not in any calendar: title, day, start, end, attendees, agenda
+    func askManualEvent(_ dir: String) {
+        let meta = (try? JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: dir + "/meta.json")))) as? [String: Any] ?? [:]
+        let isoIn = ISO8601DateFormatter()
+        let start = (meta["started_at"] as? String).flatMap { isoIn.date(from: $0) } ?? Date()
+        let end = (meta["stopped_at"] as? String).flatMap { isoIn.date(from: $0) } ?? start.addingTimeInterval(1800)
+
+        let title = NSTextField(string: meta["title"] as? String ?? "")
+        title.placeholderString = T("manual_title_placeholder")
+        let day = NSDatePicker(); day.datePickerElements = [.yearMonthDay]; day.dateValue = start
+        day.datePickerStyle = .textFieldAndStepper
+        let t1 = NSDatePicker(); t1.datePickerElements = [.hourMinute]; t1.dateValue = start
+        t1.datePickerStyle = .textFieldAndStepper
+        let t2 = NSDatePicker(); t2.datePickerElements = [.hourMinute]; t2.dateValue = end
+        t2.datePickerStyle = .textFieldAndStepper
+        let people = NSTextField(string: "")
+        people.placeholderString = T("manual_people_placeholder")
+        let agenda = NSTextField(string: "")
+        agenda.placeholderString = T("manual_agenda_placeholder")
+        for f in [title, people, agenda] { f.widthAnchor.constraint(equalToConstant: 330).isActive = true }
+
+        let times = NSStackView(views: [t1, NSTextField(labelWithString: "–"), t2])
+        let grid = NSGridView(views: [
+            [NSTextField(labelWithString: T("manual_title")), title],
+            [NSTextField(labelWithString: T("manual_day")), day],
+            [NSTextField(labelWithString: T("manual_time")), times],
+            [NSTextField(labelWithString: T("manual_people")), people],
+            [NSTextField(labelWithString: T("manual_agenda")), agenda],
+        ])
+        grid.rowSpacing = 8
+        grid.column(at: 0).xPlacement = .trailing
+        grid.frame = NSRect(x: 0, y: 0, width: 440, height: 170)
+
+        let a = NSAlert()
+        a.messageText = T("manual_header")
+        a.informativeText = T("manual_info")
+        a.accessoryView = grid
+        a.addButton(withTitle: T("manual_save")); a.addButton(withTitle: T("cal_decide_later"))
+        NSApp.activate(ignoringOtherApps: true)
+        a.window.initialFirstResponder = title
+        while true {
+            guard a.runModal() == .alertFirstButtonReturn else {
+                notify("MeetRec", T("cal_saved_for_later"))
+                loadRecover()
+                return
+            }
+            if !title.stringValue.trimmingCharacters(in: .whitespaces).isEmpty { break }
+            NSSound.beep()                       // the title is required
+        }
+        // day from the day picker, hour and minute from the time pickers
+        let cal = Calendar.current
+        func combine(_ d: Date, _ t: Date) -> Date {
+            var c = cal.dateComponents([.year, .month, .day], from: d)
+            let tc = cal.dateComponents([.hour, .minute], from: t)
+            c.hour = tc.hour; c.minute = tc.minute
+            return cal.date(from: c) ?? d
+        }
+        let s1 = combine(day.dateValue, t1.dateValue)
+        var s2 = combine(day.dateValue, t2.dateValue)
+        if s2 <= s1 { s2 = s1.addingTimeInterval(1800) }
+        let iso = ISO8601DateFormatter()
+        iso.timeZone = TimeZone.current
+        iso.formatOptions = [.withInternetDateTime]
+        var args = ["choose", dir, "manual", "--title", title.stringValue.trimmingCharacters(in: .whitespaces),
+                    "--start", iso.string(from: s1), "--end", iso.string(from: s2)]
+        if !people.stringValue.isEmpty { args += ["--people", people.stringValue] }
+        if !agenda.stringValue.isEmpty { args += ["--agenda", agenda.stringValue] }
+        runMeet2(args) { self.runPipeline(["process", dir]) }
     }
 
     func runMeet2(_ args: [String], then: @escaping () -> Void) { runMeet(args) { _, _ in then() } }

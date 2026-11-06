@@ -979,10 +979,37 @@ def cmd_candidates(a):
     return 0
 
 
-def choose_event(d, choice):
+def parse_people(text):
+    """'Mario Rossi, anna@x.com, Luca Bianchi <luca@y.com>' -> [{'name', 'email'}]"""
+    out = []
+    for part in re.split(r"[,;\n]+", text or ""):
+        part = part.strip()
+        if not part:
+            continue
+        m = re.match(r"^(.*?)\s*<([^>]+@[^>]+)>$", part)
+        if m:
+            out.append({"name": m[1].strip().strip('"'), "email": m[2].strip().lower()})
+        elif "@" in part:
+            local = part.split("@")[0].replace(".", " ").replace("_", " ").title()
+            out.append({"name": local, "email": part.lower()})
+        else:
+            out.append({"name": part, "email": ""})
+    return out
+
+
+def manual_event(title, start, end, people="", agenda=""):
+    return {"id": "manual", "manual": True, "account": "manual", "source": "manuale", "calendar": "",
+            "subject": title, "all_day": False, "start": start, "end": end,
+            "organizer": {"name": "", "email": ""}, "attendees": parse_people(people),
+            "agenda": agenda or "", "link": ""}
+
+
+def choose_event(d, choice, manual=None):
     meta = read_json(d / "meta.json", {})
     if choice == "none":
         meta["event"] = "none"
+    elif choice == "manual":
+        meta["event"] = manual
     else:
         cands = read_json(d / "candidates.json", [])
         meta["event"] = cands[int(choice) - 1]
@@ -990,7 +1017,18 @@ def choose_event(d, choice):
 
 
 def cmd_choose(a):
-    choose_event(Path(a.dir).expanduser().resolve(), a.choice)
+    d = Path(a.dir).expanduser().resolve()
+    manual = None
+    if a.choice == "manual":
+        if not a.title:
+            say("manual event: --title is required")
+            return 1
+        s_, e_ = recording_times(d)
+        start = dt.datetime.fromisoformat(a.start).astimezone() if a.start else s_
+        end = dt.datetime.fromisoformat(a.end).astimezone() if a.end else e_
+        manual = manual_event(a.title, start.isoformat(timespec="seconds"), end.isoformat(timespec="seconds"),
+                              a.people or "", a.agenda or "")
+    choose_event(d, a.choice, manual)
     return 0
 
 
@@ -1001,14 +1039,38 @@ def ask_event(d):
     write_json(d / "candidates.json", [plain_event(c) for c in cands])
     if not cands:
         say("no calendar event at this time")
-        choose_event(d, "none")
+        ans = input("Write the meeting details yourself? [y/N] > ").strip().lower()
+        if ans in ("y", "s", "yes", "si", "sì"):
+            ask_manual(d, s, e)
+        else:
+            choose_event(d, "none")
         return
     print("Which meeting was it?")
     for i, c in enumerate(cands, 1):
         print(f"  {i}. {describe(c)}")
     print("  0. none of these")
-    ans = input(f"[1] > ").strip() or "1"
+    print("  m. none of these: I write it myself")
+    ans = input(f"[1] > ").strip().lower() or "1"
+    if ans == "m":
+        ask_manual(d, s, e)
+        return
     choose_event(d, "none" if ans == "0" else ans if ans.isdigit() and 1 <= int(ans) <= len(cands) else "1")
+
+
+def ask_manual(d, s, e):
+    """terminal: title, day, times, attendees, agenda (Enter keeps the recording values)"""
+    title = ""
+    while not title:
+        title = input("Title: ").strip()
+    day = input(f"Day [{s:%Y-%m-%d}]: ").strip() or f"{s:%Y-%m-%d}"
+    t1 = input(f"Start [{s:%H:%M}]: ").strip() or f"{s:%H:%M}"
+    t2 = input(f"End [{e:%H:%M}]: ").strip() or f"{e:%H:%M}"
+    people = input("Attendees (comma separated, names or emails): ").strip()
+    agenda = input("Agenda / notes (optional): ").strip()
+    start = dt.datetime.fromisoformat(f"{day} {t1}").astimezone()
+    end = dt.datetime.fromisoformat(f"{day} {t2}").astimezone()
+    choose_event(d, "manual", manual_event(title, start.isoformat(timespec="seconds"),
+                                           end.isoformat(timespec="seconds"), people, agenda))
 
 
 def cmd_accounts(a):
@@ -1202,13 +1264,16 @@ def yq(s):
 def write_note(d, meta, event, turns, single_track, summary_line, summary_body):
     rec_start = dt.datetime.fromisoformat(meta["started_at"])
     rec_end = dt.datetime.fromisoformat(meta.get("stopped_at") or meta["started_at"])
-    title = meta.get("title") or (event or {}).get("subject") or f"Meeting {rec_start:%H:%M}"
+    # the day of the meeting: what you typed for a manual event, else the recording day
+    when = event["_start"] if event and event.get("manual") else rec_start
+    title = (event or {}).get("subject") if event and event.get("manual") else None
+    title = title or meta.get("title") or (event or {}).get("subject") or f"Meeting {rec_start:%H:%M}"
     if not C["vault"]:
         raise SystemExit(f"[meet] set 'vault' in {CONF_DIR / 'config.json'} (or in the MeetRec settings)")
     vault = Path(C["vault"])
-    folder = vault / C["meetings_dir"] / rec_start.strftime("%Y-%m")
+    folder = vault / C["meetings_dir"] / when.strftime("%Y-%m")
     folder.mkdir(parents=True, exist_ok=True)
-    base = f"{rec_start:%Y-%m-%d} - {safe_filename(title)}"
+    base = f"{when:%Y-%m-%d} - {safe_filename(title)}"
     note = folder / f"{base}.md"
     prev = meta.get("note")
     if prev and Path(prev).exists():
@@ -1223,7 +1288,7 @@ def write_note(d, meta, event, turns, single_track, summary_line, summary_body):
     dur = int((rec_end - rec_start).total_seconds() // 60)
     summary_line = summary_line or f"Registrazione e trascrizione automatica del meeting \"{title}\"."
     fm = ["---", "type: meeting", f"context: {C['context']}", "status: done",
-          f"summary: {yq(summary_line)}", f"date: {rec_start:%Y-%m-%d}", f"created: {dt.date.today()}"]
+          f"summary: {yq(summary_line)}", f"date: {when:%Y-%m-%d}", f"created: {dt.date.today()}"]
     fm.append("people:" + ("" if people else " []"))
     fm += [f"  - {yq(p)}" for p in people]
     fm += ["tags: []", f"time: {yq(f'{rec_start:%H:%M}-{rec_end:%H:%M}')}", f"duration_min: {dur}",
@@ -1241,13 +1306,21 @@ def write_note(d, meta, event, turns, single_track, summary_line, summary_body):
     if event:
         org = (event.get("organizer") or {}).get("name", "")
         att = ", ".join(x.get("name") or x.get("email", "") for x in event.get("attendees", []))
-        body += ["> [!info] Dal calendario",
-                 f"> **{event.get('subject', '')}**, {event['_start']:%d/%m/%Y %H:%M}-{event['_end']:%H:%M}"
-                 f" ([apri nel calendario]({event.get('link', '')})) · {event.get('source', '')}",
-                 f"> Organizzatore: {org}", f"> Invitati: {att}"]
+        manual = bool(event.get("manual"))
+        head = f"> **{event.get('subject', '')}**, {event['_start']:%d/%m/%Y %H:%M}-{event['_end']:%H:%M}"
+        if event.get("link"):
+            head += f" ([apri nel calendario]({event['link']}))"
+        if not manual and event.get("source"):
+            head += f" · {event['source']}"
+        body += ["> [!info] " + ("Dati del meeting (inseriti a mano)" if manual else "Dal calendario"), head]
+        if org:
+            body.append(f"> Organizzatore: {org}")
+        if att:
+            body.append(f"> {'Partecipanti' if manual else 'Invitati'}: {att}")
         agenda = invite_agenda(event)
         if agenda:
-            body += ["> ", "> **Agenda dall'invito:** " + re.sub(r"\s*\n\s*", " ", agenda)[:1200]]
+            body += ["> ", ("> **Agenda / note:** " if manual else "> **Agenda dall'invito:** ")
+                     + re.sub(r"\s*\n\s*", " ", agenda)[:1200]]
         body.append("")
     else:
         body += ["_Nessun evento di calendario trovato per questo orario._", ""]
@@ -1413,9 +1486,15 @@ def main():
     s = sub.add_parser("candidates", help="calendar events overlapping a recording")
     s.add_argument("dir")
     s.add_argument("--json", action="store_true")
-    s = sub.add_parser("choose", help="pick the event for a recording: number from candidates, or none")
+    s = sub.add_parser("choose", help="pick the event for a recording: number from candidates, none, "
+                                      "or manual --title … [--start ISO --end ISO --people … --agenda …]")
     s.add_argument("dir")
     s.add_argument("choice")
+    s.add_argument("--title")
+    s.add_argument("--start", help="ISO date-time, default: recording start")
+    s.add_argument("--end", help="ISO date-time, default: recording end")
+    s.add_argument("--people", help="comma separated names or emails")
+    s.add_argument("--agenda")
     s = sub.add_parser("accounts", help="calendar accounts")
     s.add_argument("--json", action="store_true")
     s = sub.add_parser("account", help="account add microsoft | google | macos; account remove ID; "
