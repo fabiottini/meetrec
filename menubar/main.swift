@@ -505,6 +505,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             _ = add(c.alive ? T("recording_for") + elapsed(c.start) + t : T("the_recorder_stopped_stop_to_save"), nil)
             _ = add(T("stop_and_process"), #selector(stopAndProcess), key: "s")
             _ = add(T("stop_without_processing"), #selector(stopOnly))
+            _ = add(T("stop_and_discard"), #selector(stopAndDiscard))
         } else {
             if processing { _ = add(T("processing") + processingStep, nil) }
             _ = add(T("start_recording"), #selector(start), key: "r")
@@ -521,9 +522,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             let sub = NSMenu()
             for r in recover {
                 let title = "\(r["started_at"] as? String ?? "?") [\(r["duration"] as? String ?? "")] \(r["title"] as? String ?? "")"
-                let i = NSMenuItem(title: title, action: processing ? nil : #selector(processDir(_:)), keyEquivalent: "")
-                i.target = self; i.representedObject = r["dir"]
-                sub.addItem(i)
+                let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+                let actions = NSMenu()
+                let proc = NSMenuItem(title: T("process_now"), action: processing ? nil : #selector(processDir(_:)), keyEquivalent: "")
+                proc.target = self; proc.representedObject = r["dir"]
+                let del = NSMenuItem(title: T("delete_recording"), action: #selector(discardDir(_:)), keyEquivalent: "")
+                del.target = self; del.representedObject = r["dir"]
+                actions.addItem(proc); actions.addItem(del)
+                item.submenu = actions
+                sub.addItem(item)
             }
             let m = add(T("to_process") + " (\(recover.count))", nil)
             m.isEnabled = true; m.submenu = sub
@@ -723,6 +730,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
 
     func runMeet2(_ args: [String], then: @escaping () -> Void) { runMeet(args) { _, _ in then() } }
+    /// confirm, then delete: there is no undo
+    func confirmDiscard(_ what: String) -> Bool {
+        let a = NSAlert()
+        a.alertStyle = .warning
+        a.messageText = T("discard_confirm_title")
+        a.informativeText = T("discard_confirm_info", ["what": what])
+        let del = a.addButton(withTitle: T("delete_button"))
+        del.hasDestructiveAction = true
+        a.addButton(withTitle: T("cancel"))
+        NSApp.activate(ignoringOtherApps: true)
+        return a.runModal() == .alertFirstButtonReturn
+    }
+
+    @objc func stopAndDiscard() {
+        guard let c = current(), confirmDiscard(T("discard_current", ["time": elapsed(c.start)])) else { return }
+        runMeet(["stop", "--discard"]) { status, out in
+            self.refresh()
+            self.loadRecover()
+            notify("MeetRec", status == 0 ? T("recording_discarded") : (out.split(separator: "\n").last.map(String.init) ?? ""))
+        }
+    }
+
+    @objc func discardDir(_ sender: NSMenuItem) {
+        guard let d = sender.representedObject as? String,
+              confirmDiscard((d as NSString).lastPathComponent) else { return }
+        runMeet(["discard", d]) { status, out in
+            self.loadRecover()
+            notify("MeetRec", status == 0 ? T("recording_discarded") : (out.split(separator: "\n").last.map(String.init) ?? ""))
+        }
+    }
+
     @objc func stopOnly() { runMeet(["stop", "--no-process"]) { _, _ in self.refresh(); self.loadRecover() } }
     @objc func processDir(_ sender: NSMenuItem) {
         if let d = sender.representedObject as? String { chooseEventThenProcess(d) }
