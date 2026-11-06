@@ -108,7 +108,7 @@ final class SetupModel: NSObject, ObservableObject, URLSessionDownloadDelegate {
         }
     }
 
-    func addMicrosoft(personal: Bool) { runLogin(["account", "add", "microsoft"] + (personal ? ["--personal"] : [])) }
+    func addMicrosoft() { runLogin(["account", "add", "microsoft"]) }
 
     func addGoogle() {
         if googleClient { runLogin(["account", "add", "google"]); return }
@@ -365,15 +365,13 @@ struct SetupView: View {
                         HStack {
                             Image(systemName: a.provider == "google" ? "g.circle" : a.provider == "macos" ? "calendar" : "m.circle")
                             Text(a.label.isEmpty ? a.id : a.label)
-                            Text(a.provider == "macos" ? T("cal_macos_all") : a.provider).font(.caption).foregroundStyle(.secondary)
                             if !a.ok { Text(T("cal_login_needed")).font(.caption).foregroundStyle(.orange) }
                             Spacer()
                             Button(T("cal_remove")) { m.remove(a.id) }.disabled(m.busy != nil)
                         }
                     }
                     HStack {
-                        Button(T("cal_add_ms_work")) { m.addMicrosoft(personal: false) }
-                        Button(T("cal_add_ms_personal")) { m.addMicrosoft(personal: true) }
+                        Button(T("cal_add_ms")) { m.addMicrosoft() }
                         Button(T("cal_add_google")) { m.addGoogle() }
                         if !m.accounts.contains(where: { $0.provider == "macos" }) {
                             Button(T("cal_add_macos")) { m.addMacOS() }
