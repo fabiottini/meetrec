@@ -8,7 +8,9 @@
   meet process DIR          (re)process a recording folder
   meet import FILE [-t TITLE] [--at "YYYY-MM-DD HH:MM"]   process an existing audio file (mp3, wav, m4a…)
   meet recover              list recordings never processed (e.g. after a crash)
-  meet login / logout / whoami   Microsoft login for the calendar (Calendars.Read)
+  meet accounts             calendar accounts (Microsoft, Google, macOS Calendar), as many as you want
+  meet account add microsoft [--personal] | google | macos;  meet account remove ID
+  meet candidates DIR / meet choose DIR N|none   events found for a recording, pick one
   meet events [DATE]        list calendar events of a day (test)
   meet mics                 list microphones
 """
@@ -202,6 +204,8 @@ def stop_capture():
 def cmd_stop(a):
     d = stop_capture()
     if d and not a.no_process:
+        if sys.stdin.isatty():
+            ask_event(d)
         return process(d)
     return 0
 
@@ -518,25 +522,37 @@ def transcript_md(turns, single_track):
     return "\n".join(lines)
 
 
-# ---------------------------------------------------------------- calendar (Microsoft Graph)
+# ---------------------------------------------------------------- calendars (many accounts, many providers)
+#
+# Accounts live in config.json "calendar_accounts"; tokens in ~/.config/meetrec/tokens/<id>.json (0600).
+#   microsoft  Microsoft Graph, work/school (authority organizations) or personal (consumers);
+#              every calendar of the account, shared ones included. Device code login.
+#   google     Google Calendar API, every calendar of the account. Browser login on a loopback
+#              redirect; needs your OAuth "Desktop" client in ~/.config/meetrec/google_client.json.
+#   macos      everything in the macOS Calendar app (iCloud, Google, Exchange, CalDAV, subscriptions)
+#              through the meetrec-events helper (EventKit).
+# Every provider returns the same event dict; duplicates across sources are shown once.
 
-# OAuth device code flow with the standard library only (no msal), tokens in token.json (0600)
+TOKENS_DIR = CONF_DIR / "tokens"
+GOOGLE_CLIENT = CONF_DIR / "google_client.json"
+MS_SCOPES = "Calendars.Read Calendars.Read.Shared offline_access openid profile"
+MS_SCOPES_OLD = "Calendars.Read offline_access openid profile"     # logins made before multi-account
+GOOGLE_SCOPES = "openid email https://www.googleapis.com/auth/calendar.readonly"
 
-SCOPES = "Calendars.Read offline_access openid profile"
-TOKEN_FILE = CONF_DIR / "token.json"
 
-
-def oauth_post(path, data):
-    req = urllib.request.Request(f"{C['ms_authority']}/oauth2/v2.0/{path}",
-                                 data=urllib.parse.urlencode(data).encode(), method="POST")
+def http_json(url, data=None, headers=None, method=None):
+    body = urllib.parse.urlencode(data).encode() if isinstance(data, dict) else data
+    req = urllib.request.Request(url, data=body, headers=headers or {}, method=method)
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
-            return json.loads(r.read())
+            return json.loads(r.read() or b"{}")
     except urllib.error.HTTPError as e:
         try:
             return json.loads(e.read())
         except Exception:
-            return {"error": str(e)}
+            return {"error": f"http {e.code}"}
+    except Exception as e:
+        return {"error": str(e)}
 
 
 def jwt_claims(tok):
@@ -548,36 +564,123 @@ def jwt_claims(tok):
         return {}
 
 
-def save_token(res, username=None):
-    old = read_json(TOKEN_FILE, {})
+# ---- accounts
+
+def accounts():
+    migrate_old_login()
+    return list(C.get("calendar_accounts") or [])
+
+
+def save_accounts(accts):
+    f = CONF_DIR / "config.json"
+    cfg = read_json(f, {})
+    cfg["calendar_accounts"] = accts
+    write_json(f, cfg)
+    C["calendar_accounts"] = accts
+
+
+def token_file(acc):
+    return TOKENS_DIR / f"{acc['id']}.json"
+
+
+def save_token(acc, res, username=None):
+    old = read_json(token_file(acc), {})
     claims = jwt_claims(res.get("id_token", ""))
     data = {"access_token": res["access_token"],
             "refresh_token": res.get("refresh_token") or old.get("refresh_token"),
             "expires_at": time.time() + int(res.get("expires_in", 3600)) - 120,
-            "username": claims.get("preferred_username") or username or old.get("username")}
-    CONF_DIR.mkdir(parents=True, exist_ok=True)
-    TOKEN_FILE.write_text(json.dumps(data, indent=2))
-    os.chmod(TOKEN_FILE, 0o600)
+            "username": claims.get("preferred_username") or claims.get("email") or username or old.get("username")}
+    TOKENS_DIR.mkdir(parents=True, exist_ok=True)
+    token_file(acc).write_text(json.dumps(data, indent=2))
+    os.chmod(token_file(acc), 0o600)
     return data
 
 
-def migrate_msal_cache():
-    """reuse the refresh token of the old msal cache, so an existing login keeps working"""
-    cf = CONF_DIR / "msal_cache.json"
-    if TOKEN_FILE.exists() or not cf.exists():
+def new_account_id(provider):
+    ids = {a["id"] for a in (C.get("calendar_accounts") or [])}
+    i = 1
+    while f"{provider}-{i}" in ids:
+        i += 1
+    return f"{provider}-{i}"
+
+
+def migrate_old_login():
+    """single-account era: token.json (or the msal cache) becomes the first Microsoft account"""
+    if C.get("calendar_accounts") is not None:
         return
-    cache = read_json(cf, {})
-    rt = next(iter(cache.get("RefreshToken", {}).values()), {}).get("secret")
-    user = next(iter(cache.get("Account", {}).values()), {}).get("username")
-    if rt:
-        res = oauth_post("token", {"grant_type": "refresh_token", "client_id": C["ms_client_id"],
-                                   "refresh_token": rt, "scope": SCOPES})
-        if "access_token" in res:
-            save_token(res, user)          # the old cache is left in place (removed by logout)
+    accts = []
+    old = read_json(CONF_DIR / "token.json")
+    cache = read_json(CONF_DIR / "msal_cache.json", {})
+    if old or cache:
+        acc = {"id": "microsoft-1", "provider": "microsoft", "authority": "organizations", "scopes": MS_SCOPES_OLD}
+        if old:
+            TOKENS_DIR.mkdir(parents=True, exist_ok=True)
+            token_file(acc).write_text(json.dumps(old, indent=2))
+            os.chmod(token_file(acc), 0o600)
+            acc["label"] = old.get("username")
+        else:
+            rt = next(iter(cache.get("RefreshToken", {}).values()), {}).get("secret")
+            user = next(iter(cache.get("Account", {}).values()), {}).get("username")
+            res = ms_post(acc, "token", {"grant_type": "refresh_token", "client_id": C["ms_client_id"],
+                                         "refresh_token": rt or "", "scope": MS_SCOPES_OLD})
+            if "access_token" in res:
+                acc["label"] = save_token(acc, res, user).get("username")
+        if acc.get("label"):
+            accts.append(acc)
+    save_accounts(accts)
 
 
-def cmd_login(a):
-    flow = oauth_post("devicecode", {"client_id": C["ms_client_id"], "scope": SCOPES})
+def account_token(acc):
+    """valid access token for the account, refreshed when needed (None if login is needed)"""
+    if acc["provider"] == "macos":
+        return "macos"
+    tok = read_json(token_file(acc))
+    if not tok:
+        return None
+    if time.time() < tok.get("expires_at", 0):
+        return tok["access_token"]
+    if not tok.get("refresh_token"):
+        return None
+    if acc["provider"] == "microsoft":
+        res = ms_post(acc, "token", {"grant_type": "refresh_token", "client_id": C["ms_client_id"],
+                                     "refresh_token": tok["refresh_token"], "scope": acc.get("scopes", MS_SCOPES)})
+    else:
+        client = google_client()
+        if not client:
+            return None
+        res = http_json("https://oauth2.googleapis.com/token", {
+            "grant_type": "refresh_token", "refresh_token": tok["refresh_token"],
+            "client_id": client["client_id"], "client_secret": client.get("client_secret", "")})
+    if "access_token" not in res:
+        return None
+    return save_token(acc, res)["access_token"]
+
+
+def my_emails():
+    out = set()
+    for acc in accounts():
+        for v in (acc.get("label"), read_json(token_file(acc), {}).get("username")):
+            if v and "@" in v:
+                out.add(v.lower())
+    return out
+
+
+# ---- Microsoft
+
+def ms_authority(acc):
+    if acc.get("authority") == "consumers":
+        return "https://login.microsoftonline.com/consumers"
+    return C["ms_authority"]
+
+
+def ms_post(acc, path, data):
+    return http_json(f"{ms_authority(acc)}/oauth2/v2.0/{path}", data, method="POST")
+
+
+def ms_login(personal):
+    acc = {"id": new_account_id("microsoft"), "provider": "microsoft",
+           "authority": "consumers" if personal else "organizations", "scopes": MS_SCOPES}
+    flow = ms_post(acc, "devicecode", {"client_id": C["ms_client_id"], "scope": MS_SCOPES})
     if "user_code" not in flow:
         say(f"device flow failed: {flow.get('error_description') or flow.get('error')}")
         return 1
@@ -585,12 +688,10 @@ def cmd_login(a):
     interval, deadline = int(flow.get("interval", 5)), time.time() + int(flow.get("expires_in", 900))
     while time.time() < deadline:
         time.sleep(interval)
-        res = oauth_post("token", {"grant_type": "urn:ietf:params:oauth:grant-type:device_code",
-                                   "client_id": C["ms_client_id"], "device_code": flow["device_code"]})
+        res = ms_post(acc, "token", {"grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+                                     "client_id": C["ms_client_id"], "device_code": flow["device_code"]})
         if "access_token" in res:
-            data = save_token(res)
-            say(f"logged in as {data.get('username')}")
-            return 0
+            return add_logged_account(acc, res)
         err = res.get("error")
         if err == "slow_down":
             interval += 5
@@ -601,79 +702,372 @@ def cmd_login(a):
     return 1
 
 
-def graph_token():
-    migrate_msal_cache()
-    tok = read_json(TOKEN_FILE)
+def add_logged_account(acc, res):
+    data = save_token(acc, res)
+    acc["label"] = data.get("username") or acc["id"]
+    accts = [a for a in accounts() if not (a["provider"] == acc["provider"] and a.get("label") == acc["label"])]
+    for a in accounts():                    # same account added again: drop the old token
+        if a not in accts:
+            token_file(a).unlink(missing_ok=True)
+    save_accounts(accts + [acc])
+    say(f"logged in as {acc['label']} ({acc['id']})")
+    return 0
+
+
+def ms_events(acc, start, end):
+    tok = account_token(acc)
     if not tok:
-        return None
-    if time.time() < tok.get("expires_at", 0):
-        return tok["access_token"]
-    if not tok.get("refresh_token"):
-        return None
-    res = oauth_post("token", {"grant_type": "refresh_token", "client_id": C["ms_client_id"],
-                               "refresh_token": tok["refresh_token"], "scope": SCOPES})
+        say(f"calendar {acc.get('label')}: login expired (Setup > Calendars) - skipped")
+        return []
+    hdr = {"Authorization": f"Bearer {tok}", "Prefer": 'outlook.timezone="UTC"'}
+    cals = http_json("https://graph.microsoft.com/v1.0/me/calendars?$select=id,name&$top=100", headers=hdr)
+    out = []
+    for cal in cals.get("value", [{"id": None, "name": "Calendar"}]):
+        base = (f"https://graph.microsoft.com/v1.0/me/calendars/{cal['id']}/calendarView" if cal["id"]
+                else "https://graph.microsoft.com/v1.0/me/calendarView")
+        q = urllib.parse.urlencode({
+            "startDateTime": start.astimezone(dt.timezone.utc).isoformat(),
+            "endDateTime": end.astimezone(dt.timezone.utc).isoformat(),
+            "$select": "id,subject,start,end,organizer,attendees,bodyPreview,webLink,isAllDay,isCancelled",
+            "$top": "100"})
+        res = http_json(f"{base}?{q}", headers=hdr)
+        if "error" in res:
+            say(f"calendar {acc.get('label')}/{cal.get('name')}: {str(res['error'])[:120]}")
+            continue
+        for e in res.get("value", []):
+            if e.get("isCancelled"):
+                continue
+            ppl = lambda x: {"name": x.get("emailAddress", {}).get("name") or "",
+                             "email": (x.get("emailAddress", {}).get("address") or "").lower()}
+            out.append({
+                "id": e["id"], "account": acc["id"], "source": acc.get("label") or acc["id"], "calendar": cal.get("name"),
+                "subject": e.get("subject") or "", "all_day": bool(e.get("isAllDay")),
+                "start": e["start"]["dateTime"][:19] + "+00:00", "end": e["end"]["dateTime"][:19] + "+00:00",
+                "organizer": ppl(e.get("organizer") or {}), "attendees": [ppl(x) for x in e.get("attendees", [])],
+                "agenda": e.get("bodyPreview") or "", "link": e.get("webLink") or ""})
+    return out
+
+
+# ---- Google
+
+def google_client():
+    j = read_json(GOOGLE_CLIENT)
+    return (j or {}).get("installed") or (j or {}).get("web") or j
+
+
+def google_login():
+    import base64
+    import hashlib
+    import http.server
+    import secrets
+    client = google_client()
+    if not client or not client.get("client_id"):
+        say(f"Google: missing OAuth client. Create a 'Desktop app' OAuth client in Google Cloud "
+            f"(Calendar API enabled) and save its JSON as {GOOGLE_CLIENT} (Setup can do it)")
+        return 2
+    verifier = secrets.token_urlsafe(64)
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+    state = secrets.token_urlsafe(16)
+    result = {}
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            if q.get("state", [""])[0] == state:
+                result.update({k: v[0] for k, v in q.items()})
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            ok = "code" in result
+            self.wfile.write(("<html><body style='font-family:-apple-system;padding:40px'><h2>MeetRec</h2><p>"
+                              + ("Login completed, you can close this tab." if ok else "Login failed.")
+                              + "</p></body></html>").encode())
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+    redirect = f"http://127.0.0.1:{srv.server_port}"
+    url = "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode({
+        "client_id": client["client_id"], "redirect_uri": redirect, "response_type": "code",
+        "scope": GOOGLE_SCOPES, "access_type": "offline", "prompt": "consent select_account",
+        "code_challenge": challenge, "code_challenge_method": "S256", "state": state})
+    print(f"Open in your browser to sign in to Google: {url}", flush=True)
+    subprocess.run(["open", url])
+    srv.timeout = 300
+    deadline = time.time() + 300
+    while "code" not in result and "error" not in result and time.time() < deadline:
+        srv.handle_request()
+    srv.server_close()
+    if "code" not in result:
+        say(f"Google login failed: {result.get('error', 'timeout')}")
+        return 1
+    res = http_json("https://oauth2.googleapis.com/token", {
+        "grant_type": "authorization_code", "code": result["code"], "redirect_uri": redirect,
+        "client_id": client["client_id"], "client_secret": client.get("client_secret", ""), "code_verifier": verifier})
     if "access_token" not in res:
-        return None
-    return save_token(res)["access_token"]
+        say(f"Google login failed: {res.get('error')}: {res.get('error_description', '')}")
+        return 1
+    return add_logged_account({"id": new_account_id("google"), "provider": "google"}, res)
 
 
-def graph_events(start, end):
-    tok = graph_token()
+def google_events(acc, start, end):
+    tok = account_token(acc)
     if not tok:
-        say("calendar: not logged in (run: meet login) - skipping")
-        return None
-    q = urllib.parse.urlencode({
-        "startDateTime": start.isoformat(), "endDateTime": end.isoformat(),
-        "$select": "subject,start,end,organizer,attendees,bodyPreview,webLink,onlineMeeting,isAllDay,isCancelled,showAs,location",
-        "$orderby": "start/dateTime", "$top": "50"})
-    req = urllib.request.Request("https://graph.microsoft.com/v1.0/me/calendarView?" + q, headers={
-        "Authorization": f"Bearer {tok}", "Prefer": f'outlook.timezone="{C["timezone"]}"'})
-    try:
-        with urllib.request.urlopen(req, timeout=20) as r:
-            return json.loads(r.read())["value"]
-    except Exception as e:
-        say(f"calendar: request failed ({e}) - skipping")
-        return None
+        say(f"calendar {acc.get('label')}: login expired (Setup > Calendars) - skipped")
+        return []
+    hdr = {"Authorization": f"Bearer {tok}"}
+    cals = http_json("https://www.googleapis.com/calendar/v3/users/me/calendarList?minAccessRole=reader", headers=hdr)
+    out = []
+    for cal in cals.get("items", []):
+        q = urllib.parse.urlencode({
+            "timeMin": start.astimezone(dt.timezone.utc).isoformat(), "timeMax": end.astimezone(dt.timezone.utc).isoformat(),
+            "singleEvents": "true", "orderBy": "startTime", "maxResults": "100"})
+        res = http_json(f"https://www.googleapis.com/calendar/v3/calendars/{urllib.parse.quote(cal['id'])}/events?{q}", headers=hdr)
+        for e in res.get("items", []):
+            if e.get("status") == "cancelled":
+                continue
+            all_day = "date" in e.get("start", {})
+            s = e["start"].get("dateTime") or (e["start"]["date"] + "T00:00:00+00:00")
+            en = e["end"].get("dateTime") or (e["end"]["date"] + "T00:00:00+00:00")
+            desc = re.sub(r"<[^>]+>", " ", e.get("description") or "")
+            out.append({
+                "id": e["id"], "account": acc["id"], "source": acc.get("label") or acc["id"], "calendar": cal.get("summary"),
+                "subject": e.get("summary") or "", "all_day": all_day, "start": s, "end": en,
+                "organizer": {"name": e.get("organizer", {}).get("displayName") or "", "email": (e.get("organizer", {}).get("email") or "").lower()},
+                "attendees": [{"name": x.get("displayName") or "", "email": (x.get("email") or "").lower()}
+                              for x in e.get("attendees", []) if not x.get("resource")],
+                "agenda": desc, "link": e.get("htmlLink") or ""})
+    return out
 
 
-def parse_graph_dt(x):
-    from zoneinfo import ZoneInfo
-    s = x["dateTime"][:19]
-    return dt.datetime.fromisoformat(s).replace(tzinfo=ZoneInfo(C["timezone"]))
+# ---- macOS Calendar (EventKit helper)
+
+def events_helper():
+    return first_existing(os.environ.get("MEETREC_EVENTS"), APP_DIR.parent / "MacOS" / "meetrec-events",
+                          APP_DIR / "helpers" / "meetrec-events")
 
 
-def match_event(rec_start, rec_end):
-    evs = graph_events(rec_start - dt.timedelta(hours=3), rec_end + dt.timedelta(hours=1))
-    if not evs:
-        return None
-    best, best_score = None, 0.0
+def macos_events(acc, start, end):
+    h = events_helper()
+    if not Path(h).exists():
+        say("calendar macOS: meetrec-events helper not found - skipped")
+        return []
+    r = subprocess.run([h, "--from", start.isoformat(), "--to", end.isoformat()], capture_output=True, text=True, timeout=60)
+    if r.returncode:
+        say(f"calendar macOS: {r.stderr.strip()[:200]} - skipped")
+        return []
+    out = []
+    for e in json.loads(r.stdout or "[]"):
+        e.update({"account": acc["id"], "source": f"macOS · {e.get('source') or ''}".strip(" ·")})
+        out.append(e)
+    return out
+
+
+PROVIDERS = {"microsoft": ms_events, "google": google_events, "macos": macos_events}
+
+
+def all_events(start, end):
+    """events of every account, duplicates (same title and start) shown once; direct accounts win over macOS"""
+    evs = []
+    for acc in sorted(accounts(), key=lambda a: a["provider"] == "macos"):
+        try:
+            evs += PROVIDERS[acc["provider"]](acc, start, end)
+        except Exception as e:
+            say(f"calendar {acc.get('label') or acc['id']}: {e} - skipped")
+    seen, out = set(), []
     for e in evs:
-        if e.get("isAllDay") or e.get("isCancelled"):
+        e["_start"] = dt.datetime.fromisoformat(e["start"].replace("Z", "+00:00")).astimezone()
+        e["_end"] = dt.datetime.fromisoformat(e["end"].replace("Z", "+00:00")).astimezone()
+        key = (re.sub(r"\W+", "", e["subject"].lower()), e["_start"].replace(second=0, microsecond=0))
+        if key in seen:
             continue
-        es, ee = parse_graph_dt(e["start"]), parse_graph_dt(e["end"])
-        overlap = (min(ee, rec_end) - max(es, rec_start)).total_seconds()
-        # also accept a recording started a bit early
-        if overlap <= 0 and abs((es - rec_start).total_seconds()) > 600:
+        seen.add(key)
+        out.append(e)
+    return sorted(out, key=lambda e: e["_start"])
+
+
+def candidates(rec_start, rec_end):
+    """events that overlap the recording (or start within 10 min of it), best first"""
+    out = []
+    for e in all_events(rec_start - dt.timedelta(hours=3), rec_end + dt.timedelta(hours=1)):
+        if e["all_day"]:
             continue
-        score = overlap - abs((es - rec_start).total_seconds()) / 10
-        if best is None or score > best_score:
-            best, best_score = e, score
-    if best:
-        best["_start"], best["_end"] = parse_graph_dt(best["start"]), parse_graph_dt(best["end"])
-    return best
+        overlap = (min(e["_end"], rec_end) - max(e["_start"], rec_start)).total_seconds()
+        if overlap <= 0 and abs((e["_start"] - rec_start).total_seconds()) > 600:
+            continue
+        e["_score"] = overlap - abs((e["_start"] - rec_start).total_seconds()) / 10
+        out.append(e)
+    return sorted(out, key=lambda e: -e["_score"])
+
+
+def plain_event(e):
+    return {k: v for k, v in e.items() if not k.startswith("_")}
+
+
+def load_event(d):
+    """event chosen for this recording: meta['event'] (dict or 'none'), else the best candidate"""
+    meta = read_json(d / "meta.json", {})
+    ev = meta.get("event")
+    if ev == "none":
+        return None
+    if isinstance(ev, dict):
+        ev = dict(ev)
+    else:
+        cands = candidates(dt.datetime.fromisoformat(meta["started_at"]), dt.datetime.fromisoformat(meta["stopped_at"]))
+        ev = cands[0] if cands else None
+        if not ev:
+            return None
+    ev["_start"] = dt.datetime.fromisoformat(ev["start"].replace("Z", "+00:00")).astimezone()
+    ev["_end"] = dt.datetime.fromisoformat(ev["end"].replace("Z", "+00:00")).astimezone()
+    return ev
+
+
+def recording_times(d):
+    meta = read_json(d / "meta.json", {})
+    if not meta.get("stopped_at"):
+        secs = max(track_seconds(d, "system"), track_seconds(d, "mic")) or probe_duration(d / "mix.m4a")
+        meta["stopped_at"] = (dt.datetime.fromisoformat(meta["started_at"]) + dt.timedelta(seconds=secs)).isoformat(timespec="seconds")
+        write_json(d / "meta.json", meta)
+    return dt.datetime.fromisoformat(meta["started_at"]), dt.datetime.fromisoformat(meta["stopped_at"])
+
+
+def describe(e):
+    return f"{e['_start']:%H:%M}-{e['_end']:%H:%M}  {e['subject']}  [{e['source']}]"
+
+
+def cmd_candidates(a):
+    d = Path(a.dir).expanduser().resolve()
+    s, e = recording_times(d)
+    cands = candidates(s, e)
+    write_json(d / "candidates.json", [plain_event(c) for c in cands])
+    if a.json:
+        print(json.dumps([{**plain_event(c), "label": describe(c)} for c in cands], ensure_ascii=False))
+    else:
+        for i, c in enumerate(cands, 1):
+            print(f"{i}. {describe(c)}")
+    return 0
+
+
+def choose_event(d, choice):
+    meta = read_json(d / "meta.json", {})
+    if choice == "none":
+        meta["event"] = "none"
+    else:
+        cands = read_json(d / "candidates.json", [])
+        meta["event"] = cands[int(choice) - 1]
+    write_json(d / "meta.json", meta)
+
+
+def cmd_choose(a):
+    choose_event(Path(a.dir).expanduser().resolve(), a.choice)
+    return 0
+
+
+def ask_event(d):
+    """terminal: list the events found in every calendar and let the user pick (Enter = first)"""
+    s, e = recording_times(d)
+    cands = candidates(s, e)
+    write_json(d / "candidates.json", [plain_event(c) for c in cands])
+    if not cands:
+        say("no calendar event at this time")
+        choose_event(d, "none")
+        return
+    print("Which meeting was it?")
+    for i, c in enumerate(cands, 1):
+        print(f"  {i}. {describe(c)}")
+    print("  0. none of these")
+    ans = input(f"[1] > ").strip() or "1"
+    choose_event(d, "none" if ans == "0" else ans if ans.isdigit() and 1 <= int(ans) <= len(cands) else "1")
+
+
+def cmd_accounts(a):
+    accts = accounts()
+    rows = []
+    for acc in accts:
+        ok = account_token(acc) is not None
+        rows.append({**acc, "ok": ok})
+    if a.json:
+        print(json.dumps({"accounts": rows, "google_client": bool(google_client())}, ensure_ascii=False))
+    else:
+        for r in rows:
+            print(f"{r['id']:14} {r['provider']:10} {r.get('label') or '':40} {'ok' if r['ok'] else 'LOGIN NEEDED'}")
+        if not rows:
+            print("no calendar accounts (meet account add microsoft|google|macos)")
+    return 0
+
+
+def cmd_account(a):
+    if a.action == "add":
+        if a.provider == "microsoft":
+            return ms_login(a.personal)
+        if a.provider == "google":
+            return google_login()
+        if a.provider == "macos":
+            h = events_helper()
+            r = subprocess.run([h, "--request-access"], capture_output=True, text=True) if Path(h).exists() else None
+            if not r or r.returncode:
+                say("macOS Calendar: access not granted (System Settings > Privacy > Calendars)")
+                return 1
+            accts = [x for x in accounts() if x["provider"] != "macos"]
+            save_accounts(accts + [{"id": "macos", "provider": "macos", "label": "macOS Calendar"}])
+            say("macOS Calendar added")
+            return 0
+    if a.action == "remove":
+        accts = accounts()
+        rid = a.id or a.provider
+        keep = [x for x in accts if x["id"] != rid]
+        if len(keep) == len(accts):
+            say(f"no account {rid}")
+            return 1
+        (TOKENS_DIR / f"{rid}.json").unlink(missing_ok=True)
+        save_accounts(keep)
+        say(f"removed {rid}")
+        return 0
+    if a.action == "google-client":
+        j = read_json(Path(a.provider).expanduser())
+        c = (j or {}).get("installed") or (j or {}).get("web")
+        if not c or not c.get("client_id"):
+            say("not a Google OAuth client JSON (download it from Google Cloud > Credentials)")
+            return 1
+        CONF_DIR.mkdir(parents=True, exist_ok=True)
+        GOOGLE_CLIENT.write_text(json.dumps(j, indent=2))
+        os.chmod(GOOGLE_CLIENT, 0o600)
+        say("Google OAuth client saved")
+        return 0
+    return 1
+
+
+def cmd_login(a):          # old command: add a Microsoft work account
+    return ms_login(False)
+
+
+def cmd_whoami(a):
+    rows = [(acc.get("label") or acc["id"], account_token(acc) is not None) for acc in accounts()]
+    if not rows:
+        print("not logged in")
+        return 1
+    for label, ok in rows:
+        print(label + ("" if ok else " (login needed)"))
+    return 0 if all(ok for _, ok in rows) else 1
+
+
+def cmd_logout(a):         # old command: remove every account
+    for acc in accounts():
+        token_file(acc).unlink(missing_ok=True)
+    save_accounts([])
+    (CONF_DIR / "token.json").unlink(missing_ok=True)
+    (CONF_DIR / "msal_cache.json").unlink(missing_ok=True)
+    say("logged out")
+    return 0
 
 
 def cmd_events(a):
-    from zoneinfo import ZoneInfo
     day = dt.date.fromisoformat(a.date) if a.date else dt.date.today()
-    tz = ZoneInfo(C["timezone"])
-    s = dt.datetime.combine(day, dt.time(0), tz)
-    evs = graph_events(s, s + dt.timedelta(days=1))
-    if evs is None:
-        return 1
-    for e in evs:
-        print(f"{e['start']['dateTime'][11:16]}-{e['end']['dateTime'][11:16]}  {e['subject']}"
-              f"  ({len(e.get('attendees', []))} invitati)")
+    s = dt.datetime.combine(day, dt.time(0)).astimezone()
+    for e in all_events(s, s + dt.timedelta(days=1)):
+        print(f"{'all day    ' if e['all_day'] else describe(e)[:11]} {e['subject']}  [{e['source']}"
+              f"{' / ' + e['calendar'] if e.get('calendar') else ''}]  ({len(e.get('attendees', []))} attendees)")
     return 0
 
 
@@ -687,13 +1081,11 @@ def slug_person(name):
 
 def people_links(event):
     vault, pdir = Path(C["vault"]), C["people_dir"]
-    me = graph_me_email()
+    me = my_emails()
     out, seen = [], set()
-    entries = [event.get("organizer", {})] + event.get("attendees", [])
-    for x in entries:
-        ea = x.get("emailAddress", {})
-        name, mail = ea.get("name") or "", (ea.get("address") or "").lower()
-        if not name or (me and mail == me) or "@" in name and not mail:
+    for x in [event.get("organizer") or {}] + event.get("attendees", []):
+        name, mail = x.get("name") or "", (x.get("email") or "").lower()
+        if not name or mail in me or ("@" in name and not mail):
             continue
         slug = slug_person(name)
         if slug in seen:
@@ -706,11 +1098,6 @@ def people_links(event):
     return out
 
 
-def graph_me_email():
-    u = read_json(TOKEN_FILE, {}).get("username")
-    return u.lower() if u else None
-
-
 def safe_filename(s):
     s = re.sub(r'[\\/:*?"<>|#^\[\]]+', " ", s)
     return re.sub(r"\s+", " ", s).strip()[:100] or "meeting"
@@ -718,7 +1105,7 @@ def safe_filename(s):
 
 def invite_agenda(event):
     """Text written in the invite, without the Teams/Zoom/Meet join block (links, meeting ID, passcode)."""
-    t = (event or {}).get("bodyPreview") or ""
+    t = (event or {}).get("agenda") or ""
     t = re.split(r"_{8,}|Microsoft Teams (?:meeting|Need help)|Riunione di Microsoft Teams|Join Zoom Meeting|"
                  r"Partecipa alla riunione Zoom|Join with Google Meet|Partecipa con Google Meet", t, maxsplit=1)[0]
     return re.sub(r"\s+", " ", t).strip()
@@ -803,16 +1190,17 @@ def write_note(d, meta, event, turns, single_track, summary_line, summary_body):
     if event:
         fm += [f"calendar_subject: {yq(event.get('subject', ''))}",
                "calendar_time: " + yq(f"{event['_start']:%H:%M}-{event['_end']:%H:%M}"),
-               f"calendar_link: {yq(event.get('webLink', ''))}"]
+               f"calendar_link: {yq(event.get('link', ''))}",
+               f"calendar_source: {yq(event.get('source', ''))}"]
     fm.append("---")
 
     body = [f"# {title}", ""]
     if event:
-        org = event.get("organizer", {}).get("emailAddress", {}).get("name", "")
-        att = ", ".join(a["emailAddress"].get("name", "") for a in event.get("attendees", []))
+        org = (event.get("organizer") or {}).get("name", "")
+        att = ", ".join(x.get("name") or x.get("email", "") for x in event.get("attendees", []))
         body += ["> [!info] Dal calendario",
                  f"> **{event.get('subject', '')}**, {event['_start']:%d/%m/%Y %H:%M}-{event['_end']:%H:%M}"
-                 f" ([apri in Outlook]({event.get('webLink', '')}))",
+                 f" ([apri nel calendario]({event.get('link', '')})) · {event.get('source', '')}",
                  f"> Organizzatore: {org}", f"> Invitati: {att}"]
         agenda = invite_agenda(event)
         if agenda:
@@ -857,12 +1245,10 @@ def process(d):
     single = len(tracks) == 1
     (d / "transcript.md").write_text(transcript_md(turns, single))
 
-    rec_start = dt.datetime.fromisoformat(meta["started_at"])
-    rec_end = dt.datetime.fromisoformat(meta["stopped_at"])
-    event = match_event(rec_start, rec_end)
+    event = load_event(d)
     if event:
-        say(f"calendar match: {event['subject']} ({event['_start']:%H:%M}-{event['_end']:%H:%M})")
-        write_json(d / "event.json", {k: v for k, v in event.items() if not k.startswith("_")})
+        say(f"calendar event: {describe(event)}")
+        write_json(d / "event.json", plain_event(event))
     title = meta.get("title") or (event or {}).get("subject") or "meeting"
     plain = "\n".join(f"[{hms(t['start'])}] {t['speaker']}: {t['text']}" for t in turns)
     one, body = summarize(title, event, plain) if turns else (None, None)
@@ -921,6 +1307,11 @@ def cmd_import(a):
         "started_at": start.isoformat(timespec="seconds"),
         "stopped_at": (start + dt.timedelta(seconds=secs)).isoformat(timespec="seconds"),
         "title": a.title, "language": a.lang or C["language"], "source_file": str(src)})
+    say(f"recording folder -> {d}")
+    if a.no_process:
+        return 0
+    if sys.stdin.isatty():
+        ask_event(d)
     return process(d)
 
 
@@ -948,24 +1339,6 @@ def cmd_recover(a):
     return 0
 
 
-def cmd_whoami(a):
-    migrate_msal_cache()
-    tok = read_json(TOKEN_FILE)
-    if not tok:
-        print("not logged in")
-        return 1
-    ok = graph_token() is not None
-    print((tok.get("username") or "?") + ("" if ok else " (token expired: run meet login)"))
-    return 0 if ok else 1
-
-
-def cmd_logout(a):
-    TOKEN_FILE.unlink(missing_ok=True)
-    (CONF_DIR / "msal_cache.json").unlink(missing_ok=True)
-    say("logged out")
-    return 0
-
-
 def cmd_mics(a):
     return subprocess.call([C["capture_bin"], "--list-mics"])
 
@@ -986,10 +1359,25 @@ def main():
     s.add_argument("-t", "--title", help="title (default: from the Outlook event at the file time)")
     s.add_argument("--at", help='when it was recorded, "YYYY-MM-DD HH:MM" (default: from the file)')
     s.add_argument("-l", "--lang", help="language, default from config")
+    s.add_argument("--no-process", action="store_true", help="only copy the audio (the app asks for the event first)")
     s = sub.add_parser("process")
     s.add_argument("dir")
     s = sub.add_parser("recover")
     s.add_argument("--json", action="store_true")
+    s = sub.add_parser("candidates", help="calendar events overlapping a recording")
+    s.add_argument("dir")
+    s.add_argument("--json", action="store_true")
+    s = sub.add_parser("choose", help="pick the event for a recording: number from candidates, or none")
+    s.add_argument("dir")
+    s.add_argument("choice")
+    s = sub.add_parser("accounts", help="calendar accounts")
+    s.add_argument("--json", action="store_true")
+    s = sub.add_parser("account", help="account add microsoft [--personal] | google | macos; account remove ID; "
+                                       "account google-client FILE.json")
+    s.add_argument("action", choices=["add", "remove", "google-client"])
+    s.add_argument("provider", nargs="?", help="microsoft | google | macos (add), FILE (google-client)")
+    s.add_argument("id", nargs="?")
+    s.add_argument("--personal", action="store_true", help="Microsoft personal account (outlook.com, hotmail)")
     sub.add_parser("login")
     sub.add_parser("logout")
     sub.add_parser("whoami")
@@ -998,7 +1386,8 @@ def main():
     sub.add_parser("mics")
     a = p.parse_args()
     return {"start": cmd_start, "rec": cmd_rec, "stop": cmd_stop, "status": cmd_status, "process": cmd_process, "import": cmd_import,
-            "recover": cmd_recover, "login": cmd_login, "logout": cmd_logout, "whoami": cmd_whoami, "events": cmd_events, "mics": cmd_mics}[a.cmd](a)
+            "recover": cmd_recover, "candidates": cmd_candidates, "choose": cmd_choose,
+            "accounts": cmd_accounts, "account": cmd_account, "login": cmd_login, "logout": cmd_logout, "whoami": cmd_whoami, "events": cmd_events, "mics": cmd_mics}[a.cmd](a)
 
 
 if __name__ == "__main__":

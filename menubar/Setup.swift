@@ -41,6 +41,13 @@ func cliWrapper() -> String? {
     return "#!/bin/sh\n# installed by MeetRec.app\nMEETREC_CAPTURE=\"\(capture)\" exec \"\(py)\" \"\(res)/meet.py\" \"$@\"\n"
 }
 
+struct CalAccount: Identifiable {
+    let id: String
+    let provider: String
+    let label: String
+    let ok: Bool
+}
+
 struct Check: Identifiable {
     let id: String
     var title: String
@@ -55,19 +62,91 @@ final class SetupModel: NSObject, ObservableObject, URLSessionDownloadDelegate {
     @Published var log = ""
     @Published var busy: String? = nil
     @Published var progress: Double? = nil
-    var account = ""
-    var onLogin: (() -> Void)?
+    @Published var accounts: [CalAccount] = []
+    @Published var googleClient = false
+    @Published var loginMessage = ""
     private var downloadQueue: [(file: String, url: String)] = []
 
     var requiredMissing: Bool { checks.contains { $0.required && !$0.ok } }
 
     func refresh(_ done: (() -> Void)? = nil) {
-        runMeet(["whoami"]) { status, out in
-            self.account = status == 0 ? out.trimmingCharacters(in: .whitespacesAndNewlines) : ""
+        runMeet(["accounts", "--json"]) { _, out in
+            let j = out.split(separator: "\n").last.flatMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) } as? [String: Any]
+            self.accounts = (j?["accounts"] as? [[String: Any]] ?? []).map {
+                CalAccount(id: $0["id"] as? String ?? "", provider: $0["provider"] as? String ?? "",
+                           label: $0["label"] as? String ?? "", ok: $0["ok"] as? Bool ?? false)
+            }
+            self.googleClient = j?["google_client"] as? Bool ?? false
             self.build()
             done?()
         }
         build()
+    }
+
+    // MARK: calendar accounts
+
+    /// shared by Microsoft (device code: copy the code, open the page) and Google (browser opens by itself)
+    private func runLogin(_ args: [String]) {
+        busy = T("cal_logging_in")
+        loginMessage = ""
+        runMeet(args, onLine: { line in
+            if let urlR = line.range(of: #"https://microsoft\.com/\S+|https://login\.microsoft\S+"#, options: .regularExpression),
+               let codeR = line.range(of: #"code ([A-Z0-9]+)"#, options: .regularExpression) {
+                let code = String(line[codeR].dropFirst(5))
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(code, forType: .string)
+                self.loginMessage = T("login_code_copied", ["code": code])
+                if let u = URL(string: String(line[urlR])) { NSWorkspace.shared.open(u) }
+            } else if line.contains("accounts.google.com") {
+                self.loginMessage = T("cal_google_browser")
+            }
+        }) { status, out in
+            self.busy = nil
+            self.loginMessage = status == 0 ? T("logged_in") : T("login_failed") + (out.split(separator: "\n").last.map(String.init) ?? "")
+            self.log += out.split(separator: "\n").filter { $0.hasPrefix("[meet]") }.joined(separator: "\n") + "\n"
+            self.refresh()
+        }
+    }
+
+    func addMicrosoft(personal: Bool) { runLogin(["account", "add", "microsoft"] + (personal ? ["--personal"] : [])) }
+
+    func addGoogle() {
+        if googleClient { runLogin(["account", "add", "google"]); return }
+        let a = NSAlert()
+        a.messageText = T("cal_google_client_title")
+        a.informativeText = T("cal_google_client_info")
+        a.addButton(withTitle: T("cal_google_choose_json")); a.addButton(withTitle: T("cal_google_open_console")); a.addButton(withTitle: T("cancel"))
+        NSApp.activate(ignoringOtherApps: true)
+        switch a.runModal() {
+        case .alertFirstButtonReturn:
+            let p = NSOpenPanel()
+            p.allowedContentTypes = [.json]
+            NSApp.activate(ignoringOtherApps: true)
+            guard p.runModal() == .OK, let u = p.url else { return }
+            runMeet(["account", "google-client", u.path]) { status, out in
+                self.log += out
+                if status == 0 { self.googleClient = true; self.runLogin(["account", "add", "google"]) }
+            }
+        case .alertSecondButtonReturn:
+            NSWorkspace.shared.open(URL(string: "https://console.cloud.google.com/apis/credentials")!)
+        default: break
+        }
+    }
+
+    func addMacOS() {
+        busy = T("cal_macos_access")
+        runMeet(["account", "add", "macos"]) { status, out in
+            self.busy = nil
+            self.log += out
+            if status != 0 {
+                NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars")!)
+            }
+            self.refresh()
+        }
+    }
+
+    func remove(_ id: String) {
+        runMeet(["account", "remove", id]) { _, out in self.log += out; self.refresh() }
     }
 
     private func build() {
@@ -98,8 +177,9 @@ final class SetupModel: NSObject, ObservableObject, URLSessionDownloadDelegate {
                   ok: screenOK, required: true, action: screenOK ? nil : T("setup_allow")),
             Check(id: "vault", title: T("setup_vault"), detail: vault.isEmpty ? T("setup_vault_missing") : vault,
                   ok: !vault.isEmpty && FileManager.default.fileExists(atPath: vault), required: true, action: T("setup_choose")),
-            Check(id: "outlook", title: T("setup_outlook"), detail: account.isEmpty ? T("setup_outlook_detail") : account,
-                  ok: !account.isEmpty, required: false, action: account.isEmpty ? T("setup_login") : nil),
+            Check(id: "calendars", title: T("cal_title"),
+                  detail: accounts.isEmpty ? T("cal_none") : T("cal_count", ["n": "\(accounts.count)"]),
+                  ok: !accounts.isEmpty && accounts.allSatisfy(\.ok), required: false, action: nil),
             Check(id: "claude", title: T("setup_claude"), detail: findTool("claude") ?? (FileManager.default.isExecutableFile(atPath: "\(home)/.local/bin/claude") ? "\(home)/.local/bin/claude" : T("setup_claude_detail")),
                   ok: findTool("claude") != nil || FileManager.default.isExecutableFile(atPath: "\(home)/.local/bin/claude"), required: false, action: nil),
             Check(id: "cli", title: T("setup_cli"), detail: cliOK ? cliPath : T("setup_cli_detail"),
@@ -132,7 +212,6 @@ final class SetupModel: NSObject, ObservableObject, URLSessionDownloadDelegate {
             }
             build()
         case "vault": chooseVault()
-        case "outlook": onLogin?()
         case "cli": installCLI()
         default: break
         }
@@ -278,7 +357,34 @@ struct SetupView: View {
                 }
                 .padding(.vertical, 2)
             }
-            .frame(minHeight: 400)
+            .frame(minHeight: 330)
+            GroupBox(T("cal_title")) {
+                VStack(alignment: .leading, spacing: 6) {
+                    if m.accounts.isEmpty { Text(T("cal_none_detail")).font(.caption).foregroundStyle(.secondary) }
+                    ForEach(m.accounts) { a in
+                        HStack {
+                            Image(systemName: a.provider == "google" ? "g.circle" : a.provider == "macos" ? "calendar" : "m.circle")
+                            Text(a.label.isEmpty ? a.id : a.label)
+                            Text(a.provider == "macos" ? T("cal_macos_all") : a.provider).font(.caption).foregroundStyle(.secondary)
+                            if !a.ok { Text(T("cal_login_needed")).font(.caption).foregroundStyle(.orange) }
+                            Spacer()
+                            Button(T("cal_remove")) { m.remove(a.id) }.disabled(m.busy != nil)
+                        }
+                    }
+                    HStack {
+                        Button(T("cal_add_ms_work")) { m.addMicrosoft(personal: false) }
+                        Button(T("cal_add_ms_personal")) { m.addMicrosoft(personal: true) }
+                        Button(T("cal_add_google")) { m.addGoogle() }
+                        if !m.accounts.contains(where: { $0.provider == "macos" }) {
+                            Button(T("cal_add_macos")) { m.addMacOS() }
+                        }
+                    }
+                    .disabled(m.busy != nil)
+                    if !m.loginMessage.isEmpty { Text(m.loginMessage).font(.caption).textSelection(.enabled) }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(4)
+            }
             if let b = m.busy {
                 HStack {
                     if let p = m.progress { ProgressView(value: p).frame(width: 200) } else { ProgressView().controlSize(.small) }
@@ -304,6 +410,6 @@ struct SetupView: View {
             }
         }
         .padding(18)
-        .frame(width: 620, height: 720)
+        .frame(width: 660, height: 860)
     }
 }
