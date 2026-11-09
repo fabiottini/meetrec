@@ -464,7 +464,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     func menuDidClose(_ menu: NSMenu) { levels.close() }
 
     // current recording from the CLI state file (works also if started from the terminal)
+    /// set only by --render-docs, to draw the menu of a recording without recording
+    var docsRecording: Date?
+
     func current() -> (start: Date, title: String?, alive: Bool, dir: String)? {
+        if let s = docsRecording { return (s, "Weekly product sync", true, "") }
         guard let d = FileManager.default.contents(atPath: stateFile),
               let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
               let s = j["started_at"] as? String, let pid = j["pid"] as? Int,
@@ -1162,55 +1166,62 @@ func renderDocs(_ dir: String, _ d: AppDelegate) {
     panel.addSubview(lv)
     savePNG(panel, dir + "/levels.png")
 
-    // the whole menu: level panel + items, drawn like a dark macOS menu
-    let rowH: CGFloat = 24, sepH: CGFloat = 11, pad: CGFloat = 6
-    let rows: [(String, String)?] = [
-        (T("mute_mic_menu"), "⌘M"),
-        nil,
-        (T("start_recording"), "⌘R"), (T("start_with_title"), ""),
-        nil,
-        (T("open_last_note") + "2026-11-05 - Weekly.md", ""), (T("open_recordings_folder"), ""),
-        (T("to_process") + " (1)", "›"),
-        nil,
-        (T("settings"), "⌘,"), (T("setup_menu"), ""), ("Log", ""),
-        ("MeetRec " + (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"), ""),
-        (T("quit_meetrec"), "⌘Q"),
-    ]
-    let itemsH = rows.reduce(CGFloat(0)) { $0 + ($1 == nil ? sepH : rowH) }
-    let menuView = FlippedView(frame: NSRect(x: 0, y: 0, width: lv.frame.width, height: lv.frame.height + itemsH + pad * 2))
-    menuView.appearance = dark
-    menuView.wantsLayer = true
-    menuView.layer?.backgroundColor = NSColor(white: 0.16, alpha: 1).cgColor
-    menuView.layer?.cornerRadius = 10
-    let lv2 = LevelView()
-    lv2.micName = lv.micName; lv2.history = lv.history; lv2.mic = lv.mic; lv2.sys = lv.sys
-    lv2.setVolume(0.62); lv2.agcBox.state = .on; lv2.agcBox.title = lv.agcBox.title
-    lv2.setMuted(false, unsupported: false)
-    lv2.frame.origin = NSPoint(x: 0, y: pad)
-    menuView.addSubview(lv2)
-    var y = lv2.frame.maxY
-    let font = NSFont.menuFont(ofSize: 13)
-    for r in rows {
-        guard let (title, key) = r else {
-            let sep = NSBox(frame: NSRect(x: 14, y: y + sepH / 2, width: menuView.frame.width - 28, height: 1))
-            sep.boxType = .separator
-            menuView.addSubview(sep)
-            y += sepH
-            continue
+    // the menu, built by the app itself (same items, shortcuts and disabled rows as on screen),
+    // drawn under the level panel: idle and while recording
+    d.lastNote = "/Users/you/Obsidian/Notes/Work/Meetings/2026-11/2026-11-09 - Weekly product sync.md"
+    d.recover = [["started_at": "2026-11-06T15:02:11+01:00", "duration": "0h23m10s", "title": "Supplier call",
+                  "dir": "/Users/you/Recordings/meetings/2026-11-06_150211"]]
+    func drawMenu(_ file: String, recording: Bool) {
+        d.docsRecording = recording ? Date().addingTimeInterval(-(12 * 60 + 34)) : nil
+        let menu = NSMenu()
+        d.menuNeedsUpdate(menu)
+        let items = menu.items.filter { $0.view == nil }          // the level panel is drawn below
+        let rowH: CGFloat = 24, sepH: CGFloat = 11, pad: CGFloat = 6
+        let lv2 = LevelView()
+        lv2.micName = lv.micName; lv2.history = lv.history; lv2.mic = lv.mic
+        lv2.sys = recording ? lv.sys : nil
+        lv2.recording = recording
+        lv2.setVolume(0.62); lv2.agcBox.state = .on; lv2.agcBox.title = lv.agcBox.title
+        lv2.setMuted(false, unsupported: false)
+        let itemsH = items.reduce(CGFloat(0)) { $0 + ($1.isSeparatorItem ? sepH : rowH) }
+        let menuView = FlippedView(frame: NSRect(x: 0, y: 0, width: lv2.frame.width + 40, height: lv2.frame.height + itemsH + pad * 2))
+        menuView.appearance = dark
+        menuView.wantsLayer = true
+        menuView.layer?.backgroundColor = NSColor(white: 0.16, alpha: 1).cgColor
+        menuView.layer?.cornerRadius = 10
+        lv2.frame.origin = NSPoint(x: 0, y: pad)
+        menuView.addSubview(lv2)
+        var y = lv2.frame.maxY
+        let font = NSFont.menuFont(ofSize: 13)
+        for it in items {
+            if it.isSeparatorItem {
+                let sep = NSBox(frame: NSRect(x: 14, y: y + sepH / 2, width: menuView.frame.width - 28, height: 1))
+                sep.boxType = .separator
+                menuView.addSubview(sep)
+                y += sepH
+                continue
+            }
+            let enabled = it.action != nil && it.isEnabled || it.submenu != nil
+            var key = ""
+            if it.submenu != nil { key = "›" } else if !it.keyEquivalent.isEmpty { key = "⌘" + it.keyEquivalent.uppercased() }
+            let t = NSTextField(labelWithString: (it.state == .on ? "✓ " : "") + it.title)
+            t.font = font; t.textColor = enabled ? .labelColor : .tertiaryLabelColor
+            t.lineBreakMode = .byTruncatingTail
+            t.frame = NSRect(x: 16, y: y + 3, width: menuView.frame.width - (key.isEmpty ? 32 : 92), height: 18)
+            menuView.addSubview(t)
+            if !key.isEmpty {
+                let k = NSTextField(labelWithString: key)
+                k.font = font; k.textColor = .tertiaryLabelColor; k.alignment = .right
+                k.frame = NSRect(x: menuView.frame.width - 76, y: y + 3, width: 60, height: 18)
+                menuView.addSubview(k)
+            }
+            y += rowH
         }
-        let t = NSTextField(labelWithString: title)
-        t.font = font; t.textColor = .labelColor
-        t.frame = NSRect(x: 16, y: y + 3, width: menuView.frame.width - (key.isEmpty ? 32 : 92), height: 18)
-        menuView.addSubview(t)
-        if !key.isEmpty {
-            let k = NSTextField(labelWithString: key)
-            k.font = font; k.textColor = .tertiaryLabelColor; k.alignment = .right
-            k.frame = NSRect(x: menuView.frame.width - 76, y: y + 3, width: 60, height: 18)
-            menuView.addSubview(k)
-        }
-        y += rowH
+        savePNG(menuView, dir + "/" + file)
     }
-    savePNG(menuView, dir + "/menu.png")
+    drawMenu("menu.png", recording: false)
+    drawMenu("menu-recording.png", recording: true)
+    d.docsRecording = nil
 
     // settings window (demo config from MEETREC_CONFIG_FILE, demo account)
     let st = Settings()
