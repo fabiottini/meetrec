@@ -108,10 +108,11 @@ Switching it off, or quitting MeetRec, restores the microphone as it was.
 
 ## Installation
 
-A prebuilt app is in the repo: [`dist/MeetRec.zip`](dist/MeetRec.zip) (Apple Silicon and Intel,
-macOS 15 or later).
+The prebuilt app (Apple Silicon and Intel, macOS 15 or later) is attached to every
+[release](https://github.com/fabiottini/meetrec/releases/latest); the latest one is also in the repo as
+[`dist/MeetRec.zip`](dist/MeetRec.zip).
 
-1. Download [`dist/MeetRec.zip`](https://github.com/fabiottini/meetrec/raw/main/dist/MeetRec.zip), unzip it and move **MeetRec** to Applications.
+1. Download `MeetRec-x.y.z.zip` from the [latest release](https://github.com/fabiottini/meetrec/releases/latest), unzip it and move **MeetRec** to Applications.
 2. Open it. The app is not signed with an Apple certificate, so macOS blocks it the first time.
    Go to **System Settings > Privacy & Security** and click **Open Anyway**.
    Or, from Terminal: `xattr -dr com.apple.quarantine /Applications/MeetRec.app`.
@@ -165,7 +166,8 @@ in `VERSION`, shown at the bottom of the menu and by `meet --version`, and every
 |---|---|
 | `make version` | prints the version |
 | `make bump-patch` / `bump-minor` / `bump-major` | fix / new feature / breaking change |
-| `make tag` | on `main` after the merge: creates and pushes `vX.Y.Z` (checks clean tree, changelog, zip version) |
+| `make tag` | on `main` after the merge: creates and pushes `vX.Y.Z` (checks clean tree, changelog, zip version), updates GitHub and publishes the GitHub release |
+| `make release-github` | GitHub release for the current version, with the zip and the changelog notes |
 
 **Two copies**: the public repository on GitHub (`github`, `fabiottini/meetrec`) and the author's
 private working copy on GitLab (`origin`), where branches and merge requests live. `make sync-github`
