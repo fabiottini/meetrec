@@ -64,6 +64,7 @@ final class SetupModel: NSObject, ObservableObject, URLSessionDownloadDelegate {
     @Published var progress: Double? = nil
     @Published var accounts: [CalAccount] = []
     @Published var googleClient = false
+    @Published var msClient = false
     @Published var loginMessage = ""
     @Published var loginRunning = false
     @Published var loginURL = ""
@@ -81,6 +82,7 @@ final class SetupModel: NSObject, ObservableObject, URLSessionDownloadDelegate {
                            label: $0["label"] as? String ?? "", ok: $0["ok"] as? Bool ?? false)
             }
             self.googleClient = j?["google_client"] as? Bool ?? false
+            self.msClient = j?["ms_client"] as? Bool ?? false
             self.build()
             done?()
         }
@@ -131,7 +133,21 @@ final class SetupModel: NSObject, ObservableObject, URLSessionDownloadDelegate {
         }
     }
 
-    func addMicrosoft() { runLogin(["account", "add", "microsoft"]) }
+    func addMicrosoft() {
+        if msClient { runLogin(["account", "add", "microsoft"]); return }
+        MicrosoftGuide.shared.show { [weak self] cid in
+            runMeet(["account", "ms-client", cid]) { status, out in
+                self?.log += out
+                if status == 0 {
+                    MicrosoftGuide.shared.close()
+                    self?.msClient = true
+                    self?.runLogin(["account", "add", "microsoft"])
+                } else {
+                    NSSound.beep()
+                }
+            }
+        }
+    }
 
     func addGoogle() {
         if googleClient { runLogin(["account", "add", "google"]); return }
@@ -509,6 +525,84 @@ final class GoogleGuide {
         let v = GoogleGuideView(onJSON: onJSON, onClose: { [weak self] in self?.close() })
         let w = NSWindow(contentViewController: NSHostingController(rootView: v))
         w.title = "MeetRec – Google"
+        w.styleMask = [.titled, .closable]
+        w.isReleasedWhenClosed = false
+        w.center()
+        window = w
+        NSApp.activate(ignoringOtherApps: true)
+        w.makeKeyAndOrderFront(nil)
+    }
+
+    func close() { window?.close(); window = nil }
+}
+
+
+// MARK: - step by step guide for your own Microsoft app registration (once)
+
+/// text of the client id field (an ObservableObject: @State is a macro the Command Line Tools cannot expand)
+final class ClientIDField: ObservableObject { @Published var value = "" }
+
+struct MicrosoftGuideView: View {
+    let onSave: (String) -> Void
+    let onClose: () -> Void
+    @ObservedObject var field: ClientIDField
+    let steps: [(String, String, String?)] = [
+        ("m1_title", "m1_text", "https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade"),
+        ("m2_title", "m2_text", nil),
+        ("m3_title", "m3_text", nil),
+        ("m4_title", "m4_text", nil),
+        ("m5_title", "m5_text", nil),
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(T("m_title")).font(.title2).bold()
+            Text(T("m_intro")).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    ForEach(Array(steps.enumerated()), id: \.offset) { i, st in
+                        HStack(alignment: .top, spacing: 10) {
+                            Text("\(i + 1)").font(.headline).frame(width: 24, height: 24)
+                                .background(Circle().fill(Color.accentColor.opacity(0.25)))
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(T(st.0)).font(.headline)
+                                Text(T(st.1)).font(.callout).fixedSize(horizontal: false, vertical: true)
+                                    .textSelection(.enabled)
+                            }
+                            Spacer()
+                            if let u = st.2 {
+                                Button(T("g_open")) { NSWorkspace.shared.open(URL(string: u)!) }
+                            }
+                        }
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+            HStack {
+                TextField("00000000-0000-0000-0000-000000000000", text: $field.value)
+                    .font(.system(.body, design: .monospaced))
+                Button(T("m_save")) { onSave(field.value.trimmingCharacters(in: .whitespaces)) }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(field.value.trimmingCharacters(in: .whitespaces).count < 36)
+            }
+            HStack {
+                Button(T("cancel")) { onClose() }
+                Spacer()
+            }
+        }
+        .padding(20)
+        .frame(width: 620, height: 640)
+    }
+}
+
+final class MicrosoftGuide {
+    static let shared = MicrosoftGuide()
+    private var window: NSWindow?
+
+    func show(onSave: @escaping (String) -> Void) {
+        let v = MicrosoftGuideView(onSave: onSave, onClose: { [weak self] in self?.close() }, field: ClientIDField())
+        let w = NSWindow(contentViewController: NSHostingController(rootView: v))
+        w.title = "MeetRec – Microsoft"
         w.styleMask = [.titled, .closable]
         w.isReleasedWhenClosed = false
         w.center()

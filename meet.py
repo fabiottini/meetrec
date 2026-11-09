@@ -87,8 +87,8 @@ DEFAULTS = {
     "voice_profile": "none",                           # none | p1 | p2 | p3 | p4: alter the voice in the saved audio
     "voice_profile_scope": "mine",                     # mine: only my voice; all: every voice
     "after_process_audio": "ask",                      # ask | keep | delete (delete only after the result is verified)
-    # Microsoft Graph (calendar). Same public client used by the ms365 MCP server.
-    "ms_client_id": "084a3e9f-a9f4-43f7-89f9-d229cf97853e",
+    # Microsoft Graph (calendar): your own app registration (Setup > + Microsoft explains how)
+    "ms_client_id": "",
     "ms_authority": "https://login.microsoftonline.com/organizations",
     "timezone": "Europe/Rome",
 }
@@ -724,6 +724,10 @@ def ms_post(acc, path, data):
 
 
 def ms_login():
+    if not C.get("ms_client_id"):
+        say("Microsoft: no client id. Register an app in Microsoft Entra (public client, Calendars.Read) "
+            "and save its id with: meet account ms-client <id> (Setup > + Microsoft explains how)")
+        return 2
     # one login for every kind of Microsoft account; the kind decides how the token is refreshed
     acc = {"id": new_account_id("microsoft"), "provider": "microsoft", "authority": "common", "scopes": MS_SCOPES}
     flow = ms_post(acc, "devicecode", {"client_id": C["ms_client_id"], "scope": MS_SCOPES})
@@ -1098,7 +1102,8 @@ def cmd_accounts(a):
         ok = account_token(acc) is not None
         rows.append({**acc, "ok": ok})
     if a.json:
-        print(json.dumps({"accounts": rows, "google_client": bool(google_client())}, ensure_ascii=False))
+        print(json.dumps({"accounts": rows, "google_client": bool(google_client()),
+                          "ms_client": bool(C.get("ms_client_id"))}, ensure_ascii=False))
     else:
         for r in rows:
             print(f"{r['id']:14} {r['provider']:10} {r.get('label') or '':40} {'ok' if r['ok'] else 'LOGIN NEEDED'}")
@@ -1133,6 +1138,18 @@ def cmd_account(a):
         (TOKENS_DIR / f"{rid}.json").unlink(missing_ok=True)
         save_accounts(keep)
         say(f"removed {rid}")
+        return 0
+    if a.action == "ms-client":
+        cid = (a.provider or "").strip()
+        if not re.fullmatch(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", cid):
+            say("not an Application (client) ID: it looks like 00000000-0000-0000-0000-000000000000")
+            return 1
+        f = CONF_DIR / "config.json"
+        cfg = read_json(f, {})
+        cfg["ms_client_id"] = cid.lower()
+        write_json(f, cfg)
+        C["ms_client_id"] = cid.lower()
+        say("Microsoft client id saved")
         return 0
     if a.action == "google-client":
         j = read_json(Path(a.provider).expanduser())
@@ -1725,9 +1742,9 @@ def main():
     s.add_argument("--agenda")
     s = sub.add_parser("accounts", help="calendar accounts")
     s.add_argument("--json", action="store_true")
-    s = sub.add_parser("account", help="account add microsoft | google | macos; account remove ID; "
+    s = sub.add_parser("account", help="account add microsoft | google | macos; account remove ID; account ms-client ID; "
                                        "account google-client FILE.json")
-    s.add_argument("action", choices=["add", "remove", "google-client"])
+    s.add_argument("action", choices=["add", "remove", "google-client", "ms-client"])
     s.add_argument("provider", nargs="?", help="microsoft | google | macos (add), FILE (google-client)")
     s.add_argument("id", nargs="?")
     sub.add_parser("login")

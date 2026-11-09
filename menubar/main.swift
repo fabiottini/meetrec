@@ -781,8 +781,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         MicMute.shared.restoreAll()          // never leave the mic muted without the app
     }
 
+    /// once: recording a conversation without telling the others may be illegal where you are
+    func consentAcknowledged() -> Bool {
+        if UserDefaults.standard.bool(forKey: "consentAcknowledged") { return true }
+        let a = NSAlert()
+        a.messageText = T("consent_title")
+        a.informativeText = T("consent_text")
+        a.addButton(withTitle: T("consent_ok")); a.addButton(withTitle: T("cancel"))
+        NSApp.activate(ignoringOtherApps: true)
+        guard a.runModal() == .alertFirstButtonReturn else { return false }
+        UserDefaults.standard.set(true, forKey: "consentAcknowledged")
+        return true
+    }
+
     func startRecording(title: String?, extra: [String] = []) {
         CallPrompt.shared.hide()
+        guard consentAcknowledged() else { return }
         var args = ["start"]
         if let t = title { args += ["-t", t] }
         args += extra

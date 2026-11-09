@@ -4,6 +4,14 @@ Versions follow [Semantic Versioning](https://semver.org/): MAJOR.MINOR.PATCH.
 MAJOR for changes that break existing use (config, CLI, notes), MINOR for new features,
 PATCH for fixes. Every release has a git tag `vX.Y.Z` (`make tag`).
 
+## 1.2.0 – 2026-11-09
+
+- Open source (MIT). README: personal project without support, privacy, recording consent,
+  third-party components.
+- Microsoft calendars use your own app registration (Setup > + Microsoft opens a step-by-step
+  guide; `meet account ms-client <id>`). No borrowed client id by default.
+- One-time notice about telling the other participants before the first recording.
+
 ## 1.1.0 – 2026-11-09
 
 - Much lower CPU when idle (about 7% -> 0.2%): the menu bar icon is redrawn only when it changes,
