@@ -16,8 +16,8 @@ There are two ways to use it, and they share the same state:
 > **Personal project, shared as is.** MIT license, no support and no warranty: issues and pull
 > requests are welcome, answers are not guaranteed. macOS only.
 >
-> Source: [GitLab](https://gitlab.com/fabiottini/meet-rec-transcribe) (main) ·
-> [GitHub](https://github.com/fabiottini/meetrec) (mirror).
+> Home: [github.com/fabiottini/meetrec](https://github.com/fabiottini/meetrec): issues and pull
+> requests there.
 
 ## Why
 
@@ -111,7 +111,7 @@ Switching it off, or quitting MeetRec, restores the microphone as it was.
 A prebuilt app is in the repo: [`dist/MeetRec.zip`](dist/MeetRec.zip) (Apple Silicon and Intel,
 macOS 15 or later).
 
-1. Download `dist/MeetRec.zip` from GitLab, unzip it and move **MeetRec** to Applications.
+1. Download [`dist/MeetRec.zip`](https://github.com/fabiottini/meetrec/raw/main/dist/MeetRec.zip), unzip it and move **MeetRec** to Applications.
 2. Open it. The app is not signed with an Apple certificate, so macOS blocks it the first time.
    Go to **System Settings > Privacy & Security** and click **Open Anyway**.
    Or, from Terminal: `xattr -dr com.apple.quarantine /Applications/MeetRec.app`.
@@ -139,8 +139,8 @@ under **Setup…**. The other options (folders, microphone, languages, summary�
 You need the Xcode Command Line Tools (`swiftc`); `make docs` also needs `ffmpeg`.
 
 ```sh
-git clone git@gitlab.com:fabiottini/meet-rec-transcribe.git
-cd meet-rec-transcribe
+git clone https://github.com/fabiottini/meetrec.git
+cd meetrec
 make                # list the targets
 ```
 
@@ -167,9 +167,11 @@ in `VERSION`, shown at the bottom of the menu and by `meet --version`, and every
 | `make bump-patch` / `bump-minor` / `bump-major` | fix / new feature / breaking change |
 | `make tag` | on `main` after the merge: creates and pushes `vX.Y.Z` (checks clean tree, changelog, zip version) |
 
-**Two copies**: GitLab (`origin`, where branches and merge requests live) and a private mirror on
-GitHub (`github`, `fabiottini/meetrec`). `make sync-github` copies `main` and the tags there (never
-forced: it stops if GitHub has diverged); `make tag` runs it after each release.
+**Two copies**: the public repository on GitHub (`github`, `fabiottini/meetrec`) and the author's
+private working copy on GitLab (`origin`), where branches and merge requests live. `make sync-github`
+copies `main` and the tags to GitHub (never forced: it stops if GitHub has diverged); `make tag` runs
+it after each release. If you cloned from GitHub, `origin` is GitHub and you can ignore these two
+targets.
 
 The usual flow after a change: `make bump-…` and a `CHANGELOG.md` section, `make release`, then commit
 (code, `dist/MeetRec.zip`, `docs/`) on a branch, push and open a merge request; after the merge,
