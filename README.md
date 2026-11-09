@@ -87,7 +87,7 @@ with the meeting title from your calendars.
 live levels of you and the others, the mic volume and the mute switch.
 
 <p align="center"><img src="docs/menubar.png" width="250" alt="Menu bar icon: ready and recording">
-<br><img src="docs/menu.png" width="330" alt="Menu with audio levels and commands"></p>
+<br><img src="docs/menu-recording.png" width="350" alt="Menu while recording: levels, stop and process, stop and discard"></p>
 
 **3. You stop.** MeetRec lists the events found in every calendar at that time and asks which
 meeting it was.
@@ -152,6 +152,8 @@ checks and installs what MeetRec needs and holds your calendar accounts.
 | <img src="docs/settings.png" width="330" alt="Settings window"> | <img src="docs/setup.png" width="330" alt="Setup window"> |
 
 ### The menu
+
+<p align="center"><img src="docs/menu.png" width="350" alt="Menu when idle: levels, mute, start, import, recordings to process, settings, setup"></p>
 
 The top of the menu shows the level panel:
 - **waveform**: the last 9 seconds of the microphone. Blue means OK, orange means low, red means
