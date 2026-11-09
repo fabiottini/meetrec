@@ -13,6 +13,12 @@ There are two ways to use it, and they share the same state:
 - **MeetRec**, a menu bar app;
 - **`meet`**, a command line tool.
 
+> **Personal project, shared as is.** MIT license, no support and no warranty: issues and pull
+> requests are welcome, answers are not guaranteed. macOS only.
+>
+> Source: [GitLab](https://gitlab.com/fabiottini/meet-rec-transcribe) (main) ·
+> [GitHub](https://github.com/fabiottini/meetrec) (mirror).
+
 ## Why
 
 The [Vibe](https://github.com/thewh1teagle/vibe) app sometimes freezes while it saves a recording,
@@ -254,6 +260,14 @@ account (secondary and shared ones too) and shows an event only once if it appea
 | iCloud, Yahoo, CalDAV, Exchange on-premises, subscribed `.ics` calendars | add them to the macOS Calendar app, then **+ macOS Calendar** |
 | A company that blocks third-party apps on Microsoft 365 | add the account to the macOS Calendar app, or subscribe to its published `.ics` link there |
 
+**Microsoft** needs your own app registration, once (free): **+ Microsoft** opens a guide. In
+[Microsoft Entra](https://entra.microsoft.com) > App registrations > New registration: name
+`MeetRec`, supported accounts "any organizational directory and personal Microsoft accounts", no
+redirect URI; then Authentication > Allow public client flows = Yes; API permissions > Microsoft
+Graph > Delegated: `Calendars.Read`, `Calendars.Read.Shared`. Copy the Application (client) ID into
+the guide (or `meet account ms-client <id>`). If your company does not let you register apps, use the
+macOS Calendar route.
+
 **Google** needs your own OAuth client, once (Google does not allow calendar access with a sign-in
 code): in [Google Cloud Console](https://console.cloud.google.com/apis/credentials) create a
 project, enable the **Google Calendar API**, set up the consent screen (External; add your
@@ -337,7 +351,8 @@ microphone: 16 kHz, narrow band, often very quiet. Whisper makes many more mista
 | `whisper_threads` | `4` | transcription threads: keeps the Mac responsive |
 | `ffmpeg`, `vibe_bin`, `vibe_model` | found automatically | Vibe is only a fallback |
 | `calendar_accounts` | `[]` | managed by Setup or `meet account …` |
-| `ms_client_id`, `ms_authority` | public client, `organizations` | Microsoft device code login, read-only calendar scopes |
+| `ms_client_id` | — | your Microsoft app registration (Setup > + Microsoft, or `meet account ms-client <id>`) |
+| `ms_authority` | `organizations` | Microsoft login endpoint for work/school accounts |
 | `timezone` | `Europe/Rome` | |
 
 Tokens are in `~/.config/meetrec/tokens/<account>.json` (mode 0600). Logins use only the Python
@@ -366,12 +381,37 @@ Only the keys you want to change are needed; the others come from the file insid
 The new language appears in the list the next time you open Settings.
 To ship it with the app, add it to `locales/` and run `./install.sh`.
 
+## Privacy and consent
+
+- Audio, transcription, calendar data and notes stay on your Mac. Calendar logins talk only to
+  Microsoft and Google; tokens are in `~/.config/meetrec/tokens/` (mode 0600).
+- With **Automatic summary** on, the **text** of the transcript is sent to Claude through your Claude
+  Code (`summary_cmd`). Turn it off, or point `summary_cmd` to a local model, to keep everything
+  offline.
+- **Tell the people in the call that you are recording** and ask for consent where the law requires
+  it: rules differ by country (and by US state), and recording without saying so can be illegal.
+  MeetRec shows this once before the first recording; you are responsible for how you use it.
+
+## Third-party components
+
+MeetRec does not bundle them; the Setup installs or downloads them:
+[whisper.cpp](https://github.com/ggml-org/whisper.cpp) (MIT) and the
+[whisper large-v3-turbo](https://huggingface.co/ggerganov/whisper.cpp) model,
+[Silero VAD](https://github.com/snakers4/silero-vad) (MIT) through the ggml-org whisper-vad files,
+[FFmpeg](https://ffmpeg.org) (LGPL/GPL, from Homebrew),
+[Claude Code](https://claude.com/claude-code) for the optional summary (your own account).
+[Vibe](https://github.com/thewh1teagle/vibe) is supported as a fallback transcriber.
+
 ## Known limits
 
 - All the other participants share one track, so they are not told apart.
 - Without headphones the microphone also picks up the speakers. Duplicate sentences are filtered,
   but with headphones the transcript is cleaner.
 - The app is ad-hoc signed, so after each new build macOS may ask for the permissions again.
+
+## License
+
+[MIT](LICENSE) © 2026 Fabio Lucattini
 
 ## Layout
 
