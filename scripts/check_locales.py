@@ -9,6 +9,7 @@ for f in Path("menubar").glob("*.swift"):
     text = f.read_text()
     used |= set(re.findall(r'T\("([a-z_0-9]+)"', text))
     used |= set(re.findall(r'"(g\d_(?:title|text))"', text))       # Google guide steps
+    used |= set(re.findall(r'"(voice_(?:none|p\d))"', text))       # voice profile names
 
 locales = {f.stem: set(json.loads(f.read_text())) for f in Path("locales").glob("*.json")}
 ok = True

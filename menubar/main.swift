@@ -146,6 +146,18 @@ func openObsidian(_ notePath: String) {
     if let u = c.url { NSWorkspace.shared.open(u) }
 }
 
+// MARK: - voice profiles (filters are in meet.py)
+
+let voiceProfiles: [(String, String)] = [("none", "voice_none"), ("p1", "voice_p1"), ("p2", "voice_p2"),
+                                         ("p3", "voice_p3"), ("p4", "voice_p4")]
+
+/// record a few seconds from the mic and play original + profile
+func voiceTest(_ profile: String) {
+    guard profile != "none" else { return }
+    notify("MeetRec", T("voice_test_speak"))
+    runMeet(["voice-test", profile]) { _, _ in }
+}
+
 // MARK: - settings model
 
 final class Settings: ObservableObject {
@@ -162,6 +174,11 @@ final class Settings: ObservableObject {
     @Published var keepRaw = false
     @Published var keepTracks = false
     @Published var callPrompt = true
+    @Published var recordSystem = true
+    @Published var transcriptMode = "separate"
+    @Published var voiceProfile = "none"
+    @Published var voiceScope = "mine"
+    @Published var afterAudio = "ask"
     @Published var mics: [(name: String, id: String)] = []
     @Published var account = "…"
     @Published var loginMessage = ""
@@ -186,6 +203,11 @@ final class Settings: ObservableObject {
         keepRaw = raw["keep_raw"] as? Bool ?? false
         keepTracks = raw["keep_tracks"] as? Bool ?? false
         callPrompt = raw["call_prompt"] as? Bool ?? true
+        recordSystem = raw["record_system"] as? Bool ?? true
+        transcriptMode = raw["transcript_mode"] as? String ?? "separate"
+        voiceProfile = raw["voice_profile"] as? String ?? "none"
+        voiceScope = raw["voice_profile_scope"] as? String ?? "mine"
+        afterAudio = raw["after_process_audio"] as? String ?? "ask"
         launchAtLogin = SMAppService.mainApp.status == .enabled
         saved = false
         loadMics()
@@ -219,6 +241,11 @@ final class Settings: ObservableObject {
         raw["keep_raw"] = keepRaw
         raw["keep_tracks"] = keepTracks
         raw["call_prompt"] = callPrompt
+        raw["record_system"] = recordSystem
+        raw["transcript_mode"] = transcriptMode
+        raw["voice_profile"] = voiceProfile
+        raw["voice_profile_scope"] = voiceScope
+        raw["after_process_audio"] = afterAudio
         if let d = try? JSONSerialization.data(withJSONObject: raw, options: [.prettyPrinted, .sortedKeys]) {
             try? FileManager.default.createDirectory(atPath: "\(home)/.config/meetrec", withIntermediateDirectories: true)
             try? d.write(to: URL(fileURLWithPath: configFile), options: .atomic)
@@ -278,6 +305,31 @@ struct SettingsView: View {
                 Toggle(T("keep_separate_tracks"), isOn: $s.keepTracks)
                 Toggle(T("call_prompt_setting"), isOn: $s.callPrompt)
             }
+            Section(T("audio_section")) {
+                Picker(T("what_to_record"), selection: $s.recordSystem) {
+                    Text(T("record_both")).tag(true); Text(T("record_mine")).tag(false)
+                }
+                Picker(T("transcript_kind"), selection: $s.transcriptMode) {
+                    Text(T("transcript_separate")).tag("separate"); Text(T("transcript_mixed")).tag("mixed")
+                }
+                Picker(T("voice_profile"), selection: $s.voiceProfile) {
+                    ForEach(voiceProfiles, id: \.0) { v in Text(T(v.1)).tag(v.0) }
+                }
+                if s.voiceProfile != "none" {
+                    Picker(T("voice_scope"), selection: $s.voiceScope) {
+                        Text(T("voice_scope_mine")).tag("mine"); Text(T("voice_scope_all")).tag("all")
+                    }
+                    HStack {
+                        Text(T("voice_test_info")).font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Button(T("voice_test")) { voiceTest(s.voiceProfile) }
+                    }
+                }
+                Picker(T("after_audio"), selection: $s.afterAudio) {
+                    Text(T("after_audio_ask")).tag("ask"); Text(T("after_audio_keep")).tag("keep")
+                    Text(T("after_audio_delete")).tag("delete")
+                }
+            }
             Section("Obsidian") {
                 PathField(label: "Vault", path: $s.vault)
                 TextField(T("meetings_folder_relative_to_vault"), text: $s.meetingsDir)
@@ -308,7 +360,8 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         // a grouped Form scrolls and has no intrinsic height: give the window a real size
-        .frame(width: 560, height: 1000)
+        .frame(width: 560)
+        .frame(minHeight: 500, maxHeight: .infinity)
         .padding(.bottom, 8)
     }
 }
@@ -547,19 +600,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     @objc func start() { startRecording(title: nil) }
 
+    /// title + what to record, how to transcribe and the voice profile, for this recording only
     @objc func startWithTitle() {
-        let a = NSAlert()
-        a.messageText = T("meeting_title")
-        a.informativeText = T("leave_empty_to_use_the_calendar_event")
+        let cfg = (try? JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: configFile)))) as? [String: Any] ?? [:]
         let f = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
-        a.accessoryView = f
+        f.placeholderString = T("leave_empty_to_use_the_calendar_event")
+        func popup(_ items: [(String, String)], _ current: String) -> NSPopUpButton {
+            let b = NSPopUpButton()
+            for (tag, key) in items { b.addItem(withTitle: T(key)); b.lastItem?.representedObject = tag }
+            b.selectItem(at: items.firstIndex { $0.0 == current } ?? 0)
+            return b
+        }
+        let rec = popup([("both", "record_both"), ("mine", "record_mine")],
+                        (cfg["record_system"] as? Bool ?? true) ? "both" : "mine")
+        let tr = popup([("separate", "transcript_separate"), ("mixed", "transcript_mixed")],
+                       cfg["transcript_mode"] as? String ?? "separate")
+        let vp = popup(voiceProfiles.map { ($0.0, $0.1) }, cfg["voice_profile"] as? String ?? "none")
+        let grid = NSGridView(views: [
+            [NSTextField(labelWithString: T("manual_title")), f],
+            [NSTextField(labelWithString: T("what_to_record")), rec],
+            [NSTextField(labelWithString: T("transcript_kind")), tr],
+            [NSTextField(labelWithString: T("voice_profile")), vp],
+        ])
+        grid.rowSpacing = 8
+        grid.column(at: 0).xPlacement = .trailing
+        grid.frame = NSRect(x: 0, y: 0, width: 440, height: 130)
+        let a = NSAlert()
+        a.messageText = T("start_options_title")
+        a.accessoryView = grid
         a.addButton(withTitle: T("record")); a.addButton(withTitle: T("cancel"))
         NSApp.activate(ignoringOtherApps: true)
         a.window.initialFirstResponder = f
-        if a.runModal() == .alertFirstButtonReturn {
-            let t = f.stringValue.trimmingCharacters(in: .whitespaces)
-            startRecording(title: t.isEmpty ? nil : t)
-        }
+        guard a.runModal() == .alertFirstButtonReturn else { return }
+        let t = f.stringValue.trimmingCharacters(in: .whitespaces)
+        var extra = [(rec.selectedItem?.representedObject as? String) == "mine" ? "--mic-only" : "--with-system"]
+        extra += ["--transcript", tr.selectedItem?.representedObject as? String ?? "separate"]
+        extra += ["--voice-profile", vp.selectedItem?.representedObject as? String ?? "none"]
+        startRecording(title: t.isEmpty ? nil : t, extra: extra)
     }
 
     // MARK: import an existing audio file (mp3, wav, m4a…): menu, Finder "Open With", drop on the app icon
@@ -659,10 +736,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         MicMute.shared.restoreAll()          // never leave the mic muted without the app
     }
 
-    func startRecording(title: String?) {
+    func startRecording(title: String?, extra: [String] = []) {
         CallPrompt.shared.hide()
         var args = ["start"]
         if let t = title { args += ["-t", t] }
+        args += extra
         runMeet(args) { status, out in
             self.refresh()
             if status != 0 {
@@ -842,6 +920,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         if let d = sender.representedObject as? String { chooseEventThenProcess(d) }
     }
 
+    /// "keep the audio?" after a transcript: asked only when meet verify confirms note + transcript
+    func afterProcess(_ dir: String) {
+        let meta = (try? JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: dir + "/meta.json")))) as? [String: Any] ?? [:]
+        if meta["audio_deleted_at"] != nil { return }        // already deleted by the "delete" setting
+        let cfg = (try? JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: configFile)))) as? [String: Any] ?? [:]
+        guard (cfg["after_process_audio"] as? String ?? "ask") == "ask" else { return }
+        runMeet(["verify", dir]) { status, out in
+            let why = out.split(separator: "\n").last.map(String.init) ?? ""
+            guard status == 0 else {
+                notify(T("audio_kept_title"), why.replacingOccurrences(of: "NOT OK: ", with: ""))
+                return
+            }
+            let a = NSAlert()
+            a.messageText = T("keep_audio_title")
+            a.informativeText = T("keep_audio_info", ["check": why.replacingOccurrences(of: "OK: ", with: "")])
+            a.addButton(withTitle: T("keep_audio"))
+            let del = a.addButton(withTitle: T("delete_audio"))
+            del.hasDestructiveAction = true
+            NSApp.activate(ignoringOtherApps: true)
+            if a.runModal() == .alertSecondButtonReturn {
+                runMeet(["drop-audio", dir]) { st, out in
+                    notify("MeetRec", st == 0 ? T("audio_deleted_done") : (out.split(separator: "\n").last.map(String.init) ?? ""))
+                }
+            }
+        }
+    }
+
     func runPipeline(_ args: [String]) {
         processing = true
         processingStep = T("starting")
@@ -859,6 +964,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 self.lastNote = n
                 UserDefaults.standard.set(n, forKey: "lastNote")
                 notify(T("meeting_saved"), (n as NSString).lastPathComponent)
+                if args.first == "process", args.count > 1 { self.afterProcess(args[1]) }
             } else {
                 notify(T("processing_failed"), T("the_audio_is_safe_details_in_log"))
             }
@@ -1014,7 +1120,7 @@ func renderDocs(_ dir: String, _ d: AppDelegate) {
     st.account = "you@company.com"
     st.mics = [("MacBook Pro Microphone", "BuiltInMicrophoneDevice")]
     let host = NSHostingView(rootView: SettingsView(s: st))
-    host.frame = NSRect(x: 0, y: 0, width: 560, height: 1000)
+    host.frame = NSRect(x: 0, y: 0, width: 560, height: 1240)
     host.appearance = dark
     let win = NSWindow(contentRect: host.frame, styleMask: [.titled], backing: .buffered, defer: false)
     win.appearance = dark
