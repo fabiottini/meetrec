@@ -51,6 +51,30 @@ to disk while you record, so a crash does not lose it.
   questions.
 - **Obsidian note** with frontmatter, linked people and a timestamped transcript.
 
+## Fast and offline
+
+**Recording and transcription work without internet.** whisper.cpp runs on your Mac (Apple GPU), the
+audio never leaves it, and there is no account or cloud service behind MeetRec.
+
+| Needs internet | When |
+|---|---|
+| Setup | once: Homebrew packages and the 1.6 GB model |
+| Calendars (optional) | to read the event of the meeting |
+| Summary (optional) | the transcript **text** goes to Claude; turn it off to stay fully offline |
+
+Measured on a MacBook Pro M3 (16 GB) with a real 11 min 15 s call, two tracks:
+
+| Step | Time |
+|---|---|
+| Transcription of your microphone | 59 s |
+| Transcription of the other participants | 36 s |
+| Note written in Obsidian | under 1 s |
+| **Total** | **about 1 min 37 s (about 7x faster than the call)** |
+
+The silence filter skips the pauses, which is what makes it fast: the same call took 156 s of
+transcription with Vibe's engine. Converting the raw audio when you stop adds a few seconds; the
+optional summary with Claude adds about 40 s and needs internet.
+
 ## Screenshots
 
 | Menu | Settings |
