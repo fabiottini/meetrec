@@ -9,7 +9,7 @@ PYTHON ?= $(shell command -v /opt/homebrew/bin/python3 || command -v python3)
 .DEFAULT_GOAL := help
 VERSION := $(shell tr -d ' \n' < VERSION)
 
-.PHONY: help build install install-zip open cli check docs release uninstall clean version bump-patch bump-minor bump-major tag
+.PHONY: help build install install-zip open cli check docs release uninstall clean version bump-patch bump-minor bump-major tag sync-github
 
 help: ## list the targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  make %-12s %s\n", $$1, $$2}'
@@ -84,3 +84,14 @@ tag: ## after the merge, on main: create and push the tag v$(VERSION)
 	@unzip -p $(ZIP) MeetRec.app/Contents/Resources/VERSION | grep -qx "$(VERSION)" || { echo "dist/MeetRec.zip is not version $(VERSION): make build and commit"; exit 1; }
 	git tag -a "v$(VERSION)" -m "MeetRec $(VERSION)"
 	git push origin "v$(VERSION)"
+	@$(MAKE) --no-print-directory sync-github
+
+GITHUB := git@github.com:fabiottini/meetrec.git
+
+sync-github: ## mirror main and the tags to GitHub (remote "github"); run after every merge
+	@git fetch -q origin
+	@test "$$(git rev-parse --abbrev-ref HEAD)" = main || { echo "switch to main first"; exit 1; }
+	@test "$$(git rev-parse HEAD)" = "$$(git rev-parse origin/main)" || { echo "main is not up to date with origin (git pull)"; exit 1; }
+	@git remote get-url github >/dev/null 2>&1 || git remote add github $(GITHUB)
+	git push github main
+	git push github --tags

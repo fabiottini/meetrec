@@ -137,9 +137,14 @@ in `VERSION`, shown at the bottom of the menu and by `meet --version`, and every
 | `make bump-patch` / `bump-minor` / `bump-major` | fix / new feature / breaking change |
 | `make tag` | on `main` after the merge: creates and pushes `vX.Y.Z` (checks clean tree, changelog, zip version) |
 
+**Two copies**: GitLab (`origin`, where branches and merge requests live) and a private mirror on
+GitHub (`github`, `fabiottini/meetrec`). `make sync-github` copies `main` and the tags there (never
+forced: it stops if GitHub has diverged); `make tag` runs it after each release.
+
 The usual flow after a change: `make bump-…` and a `CHANGELOG.md` section, `make release`, then commit
 (code, `dist/MeetRec.zip`, `docs/`) on a branch, push and open a merge request; after the merge,
-`make tag` on `main`, and `make install-zip` on every Mac.
+`make tag` on `main` (it also updates GitHub), and `make install-zip` on every Mac. After a merge
+without a new version, `make sync-github`.
 Each new build has a different signature, so macOS asks for the microphone and system audio
 permissions again.
 
