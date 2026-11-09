@@ -162,12 +162,13 @@ for one recording (title, what to record, transcript, voice profile).
 
   | Profile | Effect | Same words as the original voice* |
   |---|---|---|
-  | 1 – higher | pitch and formants up, frequencies shifted | 96% |
-  | 2 – deeper | pitch and formants down, shifted, chorus | 93% |
-  | 3 – robot | intonation removed, slightly higher | 89% |
-  | 4 – radio | narrow band, higher, vibrato, grainy | 92% |
+  | 1 – higher | pitch and formants up, frequencies shifted | 84–96% |
+  | 2 – deeper | pitch and formants down, shifted, light chorus | 86–93% |
+  | 3 – robot | intonation removed, slightly higher | 81–89% |
+  | 4 – radio | phone band, higher, light vibrato | 84–92% |
 
-  \*whisper on 60 s of a real call. Profiles hide the timbre, not the content: people who know you
+  \*whisper on 60 s of real calls (mixed audio and a Bluetooth headset mic). Every profile is
+  loudness-normalised, so the altered voice is as loud as a normal one. Profiles hide the timbre, not the content: people who know you
   may still recognise how you talk. Profiles 1 and 2 only shift pitch and can be partly undone;
   3 and 4 throw information away and are harder to reverse.
 - **Audio after the transcript**: *Ask every time* (default), *Always keep*, or *Always delete*.

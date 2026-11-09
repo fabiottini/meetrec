@@ -210,6 +210,7 @@
   "voice_scope_all": "All voices",
   "voice_scope_mine": "Only my voice",
   "voice_test": "Try",
+  "voice_test_bt": "The mic is a Bluetooth headset in call mode (16 kHz): low quality. For a better test choose the Mac microphone in Settings.",
   "voice_test_info": "Records 5 seconds from the mic, then plays original and profile.",
   "voice_test_speak": "Speak now: recording 5 seconds, then you hear original and profile.",
   "what_to_record": "What to record",

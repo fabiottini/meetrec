@@ -155,7 +155,9 @@ let voiceProfiles: [(String, String)] = [("none", "voice_none"), ("p1", "voice_p
 func voiceTest(_ profile: String) {
     guard profile != "none" else { return }
     notify("MeetRec", T("voice_test_speak"))
-    runMeet(["voice-test", profile]) { _, _ in }
+    runMeet(["voice-test", profile], onLine: { line in
+        if line.contains("Bluetooth") { notify("MeetRec", T("voice_test_bt")) }
+    }) { _, _ in }
 }
 
 // MARK: - settings model
