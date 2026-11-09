@@ -1100,6 +1100,43 @@ func savePNG(_ view: NSView, _ path: String, scale: CGFloat = 2) {
     try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
 }
 
+/// a view on a dark rounded background (offscreen views have no window behind them)
+func onDark(_ v: NSView, _ size: NSSize, radius: CGFloat = 12) -> NSView {
+    let box = FlippedView(frame: NSRect(origin: .zero, size: size))
+    box.appearance = NSAppearance(named: .darkAqua)
+    box.wantsLayer = true
+    box.layer?.backgroundColor = NSColor(white: 0.16, alpha: 1).cgColor
+    box.layer?.cornerRadius = radius
+    v.appearance = NSAppearance(named: .darkAqua)
+    v.frame = NSRect(origin: .zero, size: size)
+    box.addSubview(v)
+    let w = NSWindow(contentRect: box.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+    w.appearance = NSAppearance(named: .darkAqua)
+    w.contentView = box
+    box.layoutSubtreeIfNeeded()
+    RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+    return box
+}
+
+/// an NSAlert drawn offscreen, as it looks on screen
+func saveAlert(_ a: NSAlert, _ path: String) {
+    a.window.appearance = NSAppearance(named: .darkAqua)
+    a.layout()
+    guard let cv = a.window.contentView else { return }
+    cv.layoutSubtreeIfNeeded()
+    RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+    let box = FlippedView(frame: cv.bounds)
+    box.wantsLayer = true
+    box.layer?.backgroundColor = NSColor(white: 0.18, alpha: 1).cgColor
+    box.layer?.cornerRadius = 14
+    let rep = cv.bitmapImageRepForCachingDisplay(in: cv.bounds)!
+    cv.cacheDisplay(in: cv.bounds, to: rep)
+    let img = NSImage(size: cv.bounds.size); img.addRepresentation(rep)
+    let iv = NSImageView(frame: cv.bounds); iv.image = img
+    box.addSubview(iv)
+    savePNG(box, path)
+}
+
 func renderDocs(_ dir: String, _ d: AppDelegate) {
     let dark = NSAppearance(named: .darkAqua)!
     NSAppearance.current = dark
@@ -1192,6 +1229,29 @@ func renderDocs(_ dir: String, _ d: AppDelegate) {
     RunLoop.main.run(until: Date().addingTimeInterval(0.3))
     savePNG(host, dir + "/settings.png")
 
+    // setup window (demo checks and accounts)
+    let sm = SetupModel()
+    sm.checks = [
+        Check(id: "brew", title: "Homebrew", detail: "/opt/homebrew/bin/brew", ok: true, required: true, action: nil),
+        Check(id: "python", title: "Python 3", detail: "/opt/homebrew/bin/python3", ok: true, required: true, action: nil),
+        Check(id: "ffmpeg", title: "ffmpeg", detail: "/opt/homebrew/bin/ffmpeg", ok: true, required: true, action: nil),
+        Check(id: "whisper", title: "whisper.cpp", detail: "/opt/homebrew/bin/whisper-cli", ok: true, required: true, action: nil),
+        Check(id: "model", title: T("setup_model"), detail: "/Users/you/Library/Application Support/MeetRec/models/ggml-large-v3-turbo.bin",
+              ok: true, required: true, action: nil),
+        Check(id: "mic", title: T("setup_mic_permission"), detail: "OK", ok: true, required: true, action: nil),
+        Check(id: "screen", title: T("setup_screen_permission"), detail: T("setup_screen_permission_detail"),
+              ok: false, required: true, action: T("setup_allow")),
+        Check(id: "vault", title: T("setup_vault"), detail: "/Users/you/Obsidian/Notes", ok: true, required: true, action: T("setup_choose")),
+        Check(id: "calendars", title: T("cal_title"), detail: T("cal_count", ["n": "2"]), ok: true, required: false, action: nil),
+        Check(id: "claude", title: T("setup_claude"), detail: "/Users/you/.local/bin/claude", ok: true, required: false, action: nil),
+        Check(id: "cli", title: T("setup_cli"), detail: T("setup_cli_detail"), ok: false, required: false, action: T("setup_install")),
+    ]
+    sm.accounts = [CalAccount(id: "microsoft-1", provider: "microsoft", label: "you@company.com", ok: true),
+                   CalAccount(id: "google-1", provider: "google", label: "you@gmail.com", ok: true)]
+    sm.msClient = true; sm.googleClient = true
+    let setupHost = NSHostingView(rootView: SetupView(m: sm) {})
+    savePNG(onDark(setupHost, NSSize(width: 660, height: 860)), dir + "/setup.png")
+
     // menu bar states
     let bar = NSView(frame: NSRect(x: 0, y: 0, width: 250, height: 28))
     bar.appearance = dark
@@ -1223,6 +1283,69 @@ func renderDocs(_ dir: String, _ d: AppDelegate) {
         x += title.isEmpty ? 90 : 150
     }
     savePNG(bar, dir + "/menubar.png")
+
+    // ---- tour: the prompts and dialogs of a meeting, with demo data
+    let prompt = NSHostingView(rootView: CallPromptView(
+        title: T("call_detected", ["app": "Microsoft Teams"]), subtitle: "Weekly product sync",
+        primary: T("record"), secondary: T("ignore"), onPrimary: {}, onSecondary: {}))
+    savePNG(onDark(prompt, NSSize(width: 380, height: 120), radius: 16), dir + "/tour-call.png")
+
+    // "which meeting was it?" with three events from two calendars
+    let which = NSAlert()
+    which.messageText = T("cal_which_meeting")
+    which.informativeText = T("cal_which_meeting_info")
+    let stack = NSStackView()
+    stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 6
+    let labels = ["10:00-10:45  Weekly product sync  [you@company.com]",
+                  "10:30-11:00  Supplier call  [you@gmail.com]",
+                  "10:00-11:00  Focus time  [macOS · iCloud]",
+                  T("cal_write_myself"), T("cal_none_of_these")]
+    for (i, l) in labels.enumerated() {
+        let r = NSButton(radioButtonWithTitle: l, target: nil, action: nil)
+        r.state = i == 0 ? .on : .off
+        stack.addArrangedSubview(r)
+    }
+    stack.frame = NSRect(x: 0, y: 0, width: 460, height: CGFloat(labels.count) * 24)
+    which.accessoryView = stack
+    which.addButton(withTitle: T("cal_use_this")); which.addButton(withTitle: T("cal_decide_later"))
+    saveAlert(which, dir + "/tour-which-meeting.png")
+
+    // manual meeting details
+    let form = NSAlert()
+    form.messageText = T("manual_header")
+    form.informativeText = T("manual_info")
+    let title = NSTextField(string: "Call with supplier")
+    let day = NSDatePicker(); day.datePickerElements = [.yearMonthDay]; day.datePickerStyle = .textFieldAndStepper
+    let t1 = NSDatePicker(); t1.datePickerElements = [.hourMinute]; t1.datePickerStyle = .textFieldAndStepper
+    let t2 = NSDatePicker(); t2.datePickerElements = [.hourMinute]; t2.datePickerStyle = .textFieldAndStepper
+    var c = DateComponents(); c.year = 2026; c.month = 11; c.day = 9; c.hour = 15; c.minute = 0
+    let start = Calendar.current.date(from: c) ?? Date()
+    day.dateValue = start; t1.dateValue = start; t2.dateValue = start.addingTimeInterval(45 * 60)
+    let people = NSTextField(string: "Jane Doe, mark@supplier.com")
+    let agenda = NSTextField(string: "Contract renewal and SLA")
+    for f in [title, people, agenda] { f.widthAnchor.constraint(equalToConstant: 330).isActive = true }
+    let grid = NSGridView(views: [
+        [NSTextField(labelWithString: T("manual_title")), title],
+        [NSTextField(labelWithString: T("manual_day")), day],
+        [NSTextField(labelWithString: T("manual_time")), NSStackView(views: [t1, NSTextField(labelWithString: "–"), t2])],
+        [NSTextField(labelWithString: T("manual_people")), people],
+        [NSTextField(labelWithString: T("manual_agenda")), agenda],
+    ])
+    grid.rowSpacing = 8
+    grid.column(at: 0).xPlacement = .trailing
+    grid.frame = NSRect(x: 0, y: 0, width: 440, height: 170)
+    form.accessoryView = grid
+    form.addButton(withTitle: T("manual_save")); form.addButton(withTitle: T("cal_decide_later"))
+    saveAlert(form, dir + "/tour-manual.png")
+
+    // keep or delete the audio
+    let keep = NSAlert()
+    keep.messageText = T("keep_audio_title")
+    keep.informativeText = T("keep_audio_info", ["check": "42 transcript lines in 2026-11-09 - Weekly product sync.md"])
+    keep.addButton(withTitle: T("keep_audio"))
+    keep.addButton(withTitle: T("delete_audio")).hasDestructiveAction = true
+    saveAlert(keep, dir + "/tour-keep-audio.png")
+
 }
 
 let app = NSApplication.shared

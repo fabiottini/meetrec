@@ -9,7 +9,7 @@ PYTHON ?= $(shell command -v /opt/homebrew/bin/python3 || command -v python3)
 .DEFAULT_GOAL := help
 VERSION := $(shell tr -d ' \n' < VERSION)
 
-.PHONY: help build install install-zip open cli check docs release uninstall clean version bump-patch bump-minor bump-major tag sync-github release-github
+.PHONY: help build install install-zip open cli check docs release uninstall clean version bump-patch bump-minor bump-major tag sync-github release-github github-hardening
 
 help: ## list the targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  make %-12s %s\n", $$1, $$2}'
@@ -105,3 +105,9 @@ release-github: ## GitHub release v$(VERSION) with the zip and the changelog not
 	  $(GH_PERSONAL) release create "v$(VERSION)" -R fabiottini/meetrec --verify-tag --latest \
 	    --title "MeetRec $(VERSION)" --notes-file "$$tmp/notes.md" "$$tmp/MeetRec-$(VERSION).zip" && \
 	  rm -r "$$tmp"
+
+github-hardening: ## once the GitHub repo is public: protect main and tags, approve outside workflows, private security reports
+	@$(GH_PERSONAL) api -X POST repos/fabiottini/meetrec/rulesets --input scripts/ruleset-main.json --jq '"ruleset: " + .name' || true
+	@$(GH_PERSONAL) api -X POST repos/fabiottini/meetrec/rulesets --input scripts/ruleset-tags.json --jq '"ruleset: " + .name' || true
+	@$(GH_PERSONAL) api -X PUT repos/fabiottini/meetrec/actions/permissions/fork-pr-contributor-approval -f approval_policy=all_external_contributors && echo "outside contributors: workflows need approval"
+	@$(GH_PERSONAL) api -X PUT repos/fabiottini/meetrec/private-vulnerability-reporting && echo "private vulnerability reporting: on"

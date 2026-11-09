@@ -1,20 +1,19 @@
 <p align="center"><img src="docs/icon.png" width="128" alt="MeetRec"></p>
 
-# meet-rec-transcribe
+# MeetRec
 
 Records meetings on your Mac (your voice and the other participants' voices) and transcribes them
 **locally** with [whisper.cpp](https://github.com/ggml-org/whisper.cpp). It links each recording to
 the calendar event (Microsoft, Google, iCloud… as many accounts as you want) and saves a note in
 Obsidian, with an optional summary.
 
-<p align="center"><img src="docs/menubar.png" width="250" alt="Menu bar icon: ready and recording"></p>
-
 There are two ways to use it, and they share the same state:
 - **MeetRec**, a menu bar app;
 - **`meet`**, a command line tool.
 
-> **Personal project, shared as is.** MIT license, no support and no warranty: issues and pull
-> requests are welcome, answers are not guaranteed. macOS only.
+> **Personal project, free and open source, shared as is.** MIT license, no support and no
+> warranty: you use it at your own risk (see [CONTRIBUTING.md](CONTRIBUTING.md#no-warranty-no-liability)).
+> Issues and pull requests are welcome, answers are not guaranteed. macOS only.
 >
 > Home: [github.com/fabiottini/meetrec](https://github.com/fabiottini/meetrec): issues and pull
 > requests there.
@@ -75,11 +74,84 @@ The silence filter skips the pauses, which is what makes it fast: the same call 
 transcription with Vibe's engine. Converting the raw audio when you stop adds a few seconds; the
 optional summary with Claude adds about 40 s and needs internet.
 
-## Screenshots
+## A meeting, step by step
 
-| Menu | Settings |
+All pictures are drawn by the app itself with demo data.
+
+**1. A call starts.** Teams, Zoom, Meet or FaceTime opens the microphone: MeetRec offers to record,
+with the meeting title from your calendars.
+
+<p align="center"><img src="docs/tour-call.png" width="380" alt="Prompt: call in progress on Microsoft Teams, Record or Ignore"></p>
+
+**2. Recording.** The icon turns red with a timer and its bars follow your voice; the menu shows the
+live levels of you and the others, the mic volume and the mute switch.
+
+<p align="center"><img src="docs/menubar.png" width="250" alt="Menu bar icon: ready and recording">
+<br><img src="docs/menu.png" width="330" alt="Menu with audio levels and commands"></p>
+
+**3. You stop.** MeetRec lists the events found in every calendar at that time and asks which
+meeting it was.
+
+<p align="center"><img src="docs/tour-which-meeting.png" width="460" alt="Which meeting was it? Events from two calendars"></p>
+
+**4. Not in any calendar?** "Something else: I'll write it…" asks for title, day, time, attendees and
+agenda.
+
+<p align="center"><img src="docs/tour-manual.png" width="440" alt="Meeting details form"></p>
+
+**5. Transcription.** About 1.5 minutes for an 11-minute call, offline. When the note is written and
+checked, MeetRec asks whether to keep the audio.
+
+<p align="center"><img src="docs/tour-keep-audio.png" width="330" alt="Transcript done: keep or delete the audio"></p>
+
+**6. The note in Obsidian.** Frontmatter for your vault, the calendar data, a summary (optional) and
+the transcript with times and speakers. Note texts are in Italian:
+
+```markdown
+---
+type: meeting
+context: work
+status: done
+summary: "Allineamento settimanale: rilascio 2.4 confermato per giovedì, beta del nuovo onboarding da rimandare."
+date: 2026-11-09
+people:
+  - "[[People/jane_doe|jane_doe]]"
+  - "Mark Rossi"
+time: "10:00-10:44"
+duration_min: 44
+recording: "/Users/you/Recordings/meetings/2026-11-09_100012/mix.m4a"
+calendar_subject: "Weekly product sync"
+calendar_source: "you@company.com"
+---
+# Weekly product sync
+
+> [!info] Dal calendario
+> **Weekly product sync**, 09/11/2026 10:00-10:45 · you@company.com
+> Invitati: Jane Doe, Mark Rossi
+
+## Riassunto
+
+### Sintesi
+- Rilascio 2.4 confermato per giovedì, dopo i test di regressione.
+- La beta del nuovo onboarding slitta di una settimana.
+
+### Action item
+- Jane → note di rilascio entro mercoledì.
+
+## Trascrizione
+
+`00:00:04` **Me:** Partiamo dal rilascio: siamo pronti per giovedì?
+`00:00:09` **Altri:** Sì, mancano solo i test di regressione, li chiudiamo domani.
+```
+
+**7. Settings and setup.** Defaults for recording, transcript, voice profile and audio; the Setup
+checks and installs what MeetRec needs and holds your calendar accounts.
+
+| Settings | Setup |
 |---|---|
-| <img src="docs/menu.png" width="330" alt="Menu with audio levels and commands"> | <img src="docs/settings.png" width="330" alt="Settings window"> |
+| <img src="docs/settings.png" width="330" alt="Settings window"> | <img src="docs/setup.png" width="330" alt="Setup window"> |
+
+### The menu
 
 The top of the menu shows the level panel:
 - **waveform**: the last 9 seconds of the microphone. Blue means OK, orange means low, red means
@@ -117,6 +189,9 @@ The prebuilt app (Apple Silicon and Intel, macOS 15 or later) is attached to eve
    Go to **System Settings > Privacy & Security** and click **Open Anyway**.
    Or, from Terminal: `xattr -dr com.apple.quarantine /Applications/MeetRec.app`.
 3. The **Setup** window opens. It checks everything and installs what is missing:
+
+<p align="center"><img src="docs/setup.png" width="520" alt="Setup window: checks, buttons and calendar accounts"></p>
+
 
 | Item | What the button does |
 |---|---|
@@ -437,6 +512,11 @@ MeetRec does not bundle them; the Setup installs or downloads them:
   but with headphones the transcript is cleaner.
 - The app is ad-hoc signed, so after each new build macOS may ask for the permissions again.
 
+## Contributing
+
+Ideas, bug reports and pull requests are welcome: read [CONTRIBUTING.md](CONTRIBUTING.md) first.
+Security problems: [SECURITY.md](SECURITY.md), please do not open a public issue.
+
 ## License
 
 [MIT](LICENSE) © 2026 Fabio Lucattini
@@ -456,6 +536,7 @@ locales/                  UI texts, one JSON file per language
 assets/                   icon (make-icon.swift draws the PNG, AppIcon.icns for the app)
 docs/                     README images (MeetRec --render-docs docs)
 Makefile, build.sh, install.sh
+CONTRIBUTING.md, SECURITY.md  how to contribute, how to report a security problem
 VERSION, CHANGELOG.md       version (semver) and release notes
 scripts/check_locales.py  used by make check
 ```
