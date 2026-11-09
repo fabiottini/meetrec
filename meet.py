@@ -1506,15 +1506,21 @@ def cmd_drop_audio(a):
 # original audio first; the original is then replaced. Profiles 1-2 only shift pitch and formants
 # (partly reversible); 3 (robot) and 4 (radio) throw information away and are harder to undo.
 
+# every profile: low cut before, loudness normalisation and a limiter after, so the altered voice is
+# as loud and clear as a normal one (the first version lost up to 13 dB and sounded far away)
+_PRE = "highpass=f=90,aresample=48000"
+_POST = "dynaudnorm=f=150:g=15:p=0.9:m=20,alimiter=limit=0.89:level=false"
+
 VOICE_PROFILES = {
-    "p1": ("Profile 1: higher", "aresample=48000,asetrate=48000*1.19,aresample=48000,atempo=1/1.19,afreqshift=shift=60"),
-    "p2": ("Profile 2: deeper", "aresample=48000,asetrate=48000*0.84,aresample=48000,atempo=1/0.84,"
-                                "afreqshift=shift=-50,chorus=0.6:0.9:40:0.3:0.25:2"),
-    "p3": ("Profile 3: robot", "aresample=48000,afftfilt=real='hypot(re,im)':imag='0':win_size=512:overlap=0.75,"
-                               "asetrate=48000*1.12,aresample=48000,atempo=1/1.12"),
-    "p4": ("Profile 4: radio", "aresample=48000,asetrate=48000*1.26,aresample=48000,atempo=1/1.26,"
-                               "bandpass=f=1600:width_type=h:w=2800,vibrato=f=6:d=0.15,acrusher=bits=10:mode=log:aa=1"),
+    "p1": ("Profile 1: higher", f"{_PRE},asetrate=48000*1.19,aresample=48000,atempo=1/1.19,afreqshift=shift=40,{_POST}"),
+    "p2": ("Profile 2: deeper", f"{_PRE},asetrate=48000*0.84,aresample=48000,atempo=1/0.84,afreqshift=shift=-40,"
+                                f"chorus=0.5:0.9:30:0.25:0.2:1.5,{_POST}"),
+    "p3": ("Profile 3: robot", f"{_PRE},afftfilt=real='hypot(re,im)':imag='0':win_size=1024:overlap=0.75,"
+                               f"asetrate=48000*1.12,aresample=48000,atempo=1/1.12,{_POST}"),
+    "p4": ("Profile 4: radio", f"{_PRE},asetrate=48000*1.2,aresample=48000,atempo=1/1.2,bandpass=f=1850:width_type=h:w=3100,"
+                               f"vibrato=f=5:d=0.1,acrusher=bits=12:mode=log:aa=1,{_POST}"),
 }
+NORMALIZE = f"{_PRE},{_POST}"      # the original in voice-test, for a fair comparison
 
 
 def alter(src, dst, profile):
@@ -1579,8 +1585,13 @@ def cmd_voice_test(a):
         say("no audio recorded (microphone permission?)")
         return 1
     m = read_json(raw[0])
-    ff("-f", "s16le", "-ar", str(m["sample_rate"]), "-ac", "1", "-i", str(raw[0].with_suffix(".s16")), str(t / "orig.wav"))
-    ff("-i", str(t / "orig.wav"), "-af", VOICE_PROFILES[a.profile][1], str(t / "alt.wav"))
+    ff("-f", "s16le", "-ar", str(m["sample_rate"]), "-ac", "1", "-i", str(raw[0].with_suffix(".s16")), str(t / "raw.wav"))
+    ff("-i", str(t / "raw.wav"), "-af", NORMALIZE, str(t / "orig.wav"))
+    ff("-i", str(t / "raw.wav"), "-af", VOICE_PROFILES[a.profile][1], str(t / "alt.wav"))
+    if m["sample_rate"] <= 24000:
+        say(f"note: the microphone records at {m['sample_rate'] // 1000} kHz (Bluetooth headset in call mode): "
+            "low quality; for a better result use the Mac microphone")
+    time.sleep(2)            # give Bluetooth headphones time to leave call mode before playing
     say("original…")
     subprocess.run(["afplay", str(t / "orig.wav")])
     say(f"{VOICE_PROFILES[a.profile][0]}…")

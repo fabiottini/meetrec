@@ -210,6 +210,7 @@
   "voice_scope_all": "Tutte le voci",
   "voice_scope_mine": "Solo la mia voce",
   "voice_test": "Prova",
+  "voice_test_bt": "Il microfono sono cuffie Bluetooth in modalità chiamata (16 kHz): la qualità è bassa. Per una prova migliore scegli il microfono del Mac nelle Impostazioni.",
   "voice_test_info": "Registra 5 secondi dal microfono, poi fa sentire originale e profilo.",
   "voice_test_speak": "Parla ora: registro 5 secondi, poi senti originale e profilo.",
   "what_to_record": "Cosa registrare",
