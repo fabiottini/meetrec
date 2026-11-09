@@ -127,8 +127,19 @@ make                # list the targets
 | `make uninstall` | removes the app and the `meet` command (config, tokens and recordings are kept) |
 | `make clean` | removes `dist/MeetRec.app` (the zip stays) |
 
-The usual flow after a change: `make release`, then commit (code, `dist/MeetRec.zip`, `docs/`) on a
-branch, push and open a merge request; after the merge, `make install-zip` on every Mac.
+**Versions** follow [Semantic Versioning](https://semver.org/) (`MAJOR.MINOR.PATCH`): the version is
+in `VERSION`, shown at the bottom of the menu and by `meet --version`, and every release is listed in
+[`CHANGELOG.md`](CHANGELOG.md) and tagged `vX.Y.Z` in git.
+
+| Command | What it does |
+|---|---|
+| `make version` | prints the version |
+| `make bump-patch` / `bump-minor` / `bump-major` | fix / new feature / breaking change |
+| `make tag` | on `main` after the merge: creates and pushes `vX.Y.Z` (checks clean tree, changelog, zip version) |
+
+The usual flow after a change: `make bump-…` and a `CHANGELOG.md` section, `make release`, then commit
+(code, `dist/MeetRec.zip`, `docs/`) on a branch, push and open a merge request; after the merge,
+`make tag` on `main`, and `make install-zip` on every Mac.
 Each new build has a different signature, so macOS asks for the microphone and system audio
 permissions again.
 
@@ -372,5 +383,6 @@ locales/                  UI texts, one JSON file per language
 assets/                   icon (make-icon.swift draws the PNG, AppIcon.icns for the app)
 docs/                     README images (MeetRec --render-docs docs)
 Makefile, build.sh, install.sh
+VERSION, CHANGELOG.md       version (semver) and release notes
 scripts/check_locales.py  used by make check
 ```

@@ -1675,8 +1675,15 @@ def cmd_mics(a):
     return subprocess.call([C["capture_bin"], "--list-mics"])
 
 
+def app_version():
+    """VERSION next to meet.py (repo, or Contents/Resources in the app)"""
+    f = APP_DIR / "VERSION"
+    return f.read_text().strip() if f.exists() else "dev"
+
+
 def main():
     p = argparse.ArgumentParser(prog="meet", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--version", action="version", version=f"MeetRec {app_version()}")
     sub = p.add_subparsers(dest="cmd", required=True)
     for name in ("start", "rec"):
         s = sub.add_parser(name)
