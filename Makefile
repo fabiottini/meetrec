@@ -9,7 +9,7 @@ PYTHON ?= $(shell command -v /opt/homebrew/bin/python3 || command -v python3)
 .DEFAULT_GOAL := help
 VERSION := $(shell tr -d ' \n' < VERSION)
 
-.PHONY: help build install install-zip open cli check docs release uninstall clean version bump-patch bump-minor bump-major tag sync-github
+.PHONY: help build install install-zip open cli check docs release uninstall clean version bump-patch bump-minor bump-major tag sync-github release-github
 
 help: ## list the targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  make %-12s %s\n", $$1, $$2}'
@@ -85,6 +85,7 @@ tag: ## after the merge, on main: create and push the tag v$(VERSION)
 	git tag -a "v$(VERSION)" -m "MeetRec $(VERSION)"
 	git push origin "v$(VERSION)"
 	@$(MAKE) --no-print-directory sync-github
+	@$(MAKE) --no-print-directory release-github
 
 GITHUB := git@github.com:fabiottini/meetrec.git
 
@@ -95,3 +96,12 @@ sync-github: ## mirror main and the tags to GitHub (remote "github"); run after 
 	@git remote get-url github >/dev/null 2>&1 || git remote add github $(GITHUB)
 	git push github main
 	git push github --tags
+
+GH_PERSONAL := GH_CONFIG_DIR=$(HOME)/.config/gh-fabiottini gh
+
+release-github: ## GitHub release v$(VERSION) with the zip and the changelog notes (personal gh account)
+	@tmp=$$(mktemp -d) && cp $(ZIP) "$$tmp/MeetRec-$(VERSION).zip" && \
+	  $(PYTHON) scripts/changelog_section.py $(VERSION) > "$$tmp/notes.md" && \
+	  $(GH_PERSONAL) release create "v$(VERSION)" -R fabiottini/meetrec --verify-tag --latest \
+	    --title "MeetRec $(VERSION)" --notes-file "$$tmp/notes.md" "$$tmp/MeetRec-$(VERSION).zip" && \
+	  rm -r "$$tmp"
