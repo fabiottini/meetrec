@@ -100,7 +100,8 @@ func runMeet(_ args: [String], onLine: ((String) -> Void)? = nil,
     let lock = NSLock()
     pipe.fileHandleForReading.readabilityHandler = { h in
         let data = h.availableData
-        guard !data.isEmpty, let s = String(data: data, encoding: .utf8) else { return }
+        if data.isEmpty { h.readabilityHandler = nil; return }      // EOF: stop, do not spin
+        guard let s = String(data: data, encoding: .utf8) else { return }
         lock.lock(); output += s; partial += s
         var lines: [String] = []
         while let r = partial.range(of: "\n") {
@@ -144,6 +145,23 @@ func openObsidian(_ notePath: String) {
     var c = URLComponents(string: "obsidian://open")!
     c.queryItems = [URLQueryItem(name: "path", value: notePath)]
     if let u = c.url { NSWorkspace.shared.open(u) }
+}
+
+// MARK: - config.json, read again only when the file changes (it is polled by the timers)
+
+final class Config {
+    static let shared = Config()
+    private var cached: [String: Any] = [:]
+    private var mtime: Date?
+
+    var value: [String: Any] {
+        let m = (try? FileManager.default.attributesOfItem(atPath: configFile))?[.modificationDate] as? Date
+        if m != mtime || mtime == nil {
+            mtime = m
+            cached = (try? JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: configFile)))) as? [String: Any] ?? [:]
+        }
+        return cached
+    }
 }
 
 // MARK: - voice profiles (filters are in meet.py)
@@ -390,7 +408,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     var lastNote: String? = UserDefaults.standard.string(forKey: "lastNote")
     var recover: [[String: Any]] = []
     var settingsWindow: NSWindow?
-    var muteTick = 0
     let settings = Settings()
     let setup = SetupModel()
     let calls = CallWatcher()
@@ -407,14 +424,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         let menu = NSMenu()
         menu.delegate = self
         item.menu = menu
-        timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in self?.refresh() }
+        scheduleTimer()
         levels.currentDir = { [weak self] in
             guard let c = self?.current(), c.alive else { return nil }
             return c.dir
         }
-        levels.config = {
-            (try? JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: configFile)))) as? [String: Any] ?? [:]
-        }
+        levels.config = { Config.shared.value }
         levels.onMute = { [weak self] in self?.toggleMute() }
         levels.saveConfig = { c in
             if let d = try? JSONSerialization.data(withJSONObject: c, options: [.prettyPrinted, .sortedKeys]) {
@@ -509,29 +524,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         return img
     }
 
-    func micUID() -> String? {
-        let c = (try? JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: configFile)))) as? [String: Any]
-        return c?["mic_id"] as? String
+    func micUID() -> String? { Config.shared.value["mic_id"] as? String }
+
+    // Idle cost: the timer runs every 2 s when nothing happens (1 s with the mute on, so a mic
+    // unmuted by another app is muted again quickly) and 4 times a second only while recording,
+    // for the live bars. The icon is redrawn only when what it shows changes.
+    var timerInterval: TimeInterval = 0
+    var lastIconKey = ""
+    var lastMuteTick = Date.distantPast
+
+    func scheduleTimer() {
+        let recording = current()?.alive == true
+        let want: TimeInterval = recording ? 0.25 : (MicMute.shared.enabled || processing ? 1 : 2)
+        guard want != timerInterval else { return }
+        timer?.invalidate()
+        timerInterval = want
+        let t = Timer(timeInterval: want, repeats: true) { [weak self] _ in self?.refresh() }
+        t.tolerance = want * 0.2            // let macOS batch wake-ups
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
     }
 
     func refresh() {
         guard let b = item.button else { return }
         let cur = current()
-        muteTick += 1
-        if muteTick % 4 == 0 { MicMute.shared.tick(micUID: micUID()) }   // once a second
+        if Date().timeIntervalSince(lastMuteTick) >= 1 {
+            lastMuteTick = Date()
+            MicMute.shared.tick(micUID: micUID())
+        }
+        let muted = MicMute.shared.enabled
+        var key: String, title: String
+        var make: () -> NSImage
         if let c = cur {
             let db = LevelController.readLevels(c.dir)["mic"]?.0 ?? -120
-            b.image = c.alive ? glyph(fill: .systemRed, level: db, muted: MicMute.shared.enabled)
-                              : glyph(fill: .systemOrange, level: nil)
-            b.title = " " + elapsed(c.start)
+            let bucket = Int(max(0, min(8, (db + 60) / 6)))      // 9 bar heights are enough for the eye
+            key = c.alive ? "rec-\(bucket)-\(muted)" : "dead"
+            make = { c.alive ? self.glyph(fill: .systemRed, level: db, muted: muted) : self.glyph(fill: .systemOrange, level: nil) }
+            title = " " + elapsed(c.start)
         } else if processing {
-            b.image = glyph(fill: nil, level: nil)
-            b.title = " …"
+            key = "proc"; title = " …"
+            make = { self.glyph(fill: nil, level: nil) }
         } else {
-            b.image = glyph(fill: nil, level: nil, muted: MicMute.shared.enabled)
-            b.title = ""
+            key = "idle-\(muted)"; title = ""
+            make = { self.glyph(fill: nil, level: nil, muted: muted) }
         }
-        b.imagePosition = .imageLeading
+        if key != lastIconKey {
+            b.image = make()
+            b.imagePosition = .imageLeading
+            lastIconKey = key
+        }
+        if b.title != title { b.title = title }
+        scheduleTimer()
     }
 
     func loadRecover() {
@@ -594,6 +637,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         _ = add(T("settings"), #selector(openSettings), key: ",")
         _ = add(T("setup_menu"), #selector(openSetup))
         _ = add("Log", #selector(openLog))
+        let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+        let b = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? ""
+        _ = add("MeetRec \(v)" + (b.isEmpty ? "" : " (\(b))"), nil)
         _ = add(T("quit_meetrec"), #selector(quit), key: "q")
         loadRecover()
     }
@@ -688,10 +734,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     // MARK: call detection: offer "Record" when a call starts, "Stop" when it ends
 
-    func callPromptEnabled() -> Bool {
-        let c = (try? JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: configFile)))) as? [String: Any]
-        return c?["call_prompt"] as? Bool ?? true
-    }
+    func callPromptEnabled() -> Bool { Config.shared.value["call_prompt"] as? Bool ?? true }
 
     func startCallWatcher() {
         calls.ownPIDs = {
@@ -1078,7 +1121,9 @@ func renderDocs(_ dir: String, _ d: AppDelegate) {
         (T("open_last_note") + "2026-11-05 - Weekly.md", ""), (T("open_recordings_folder"), ""),
         (T("to_process") + " (1)", "›"),
         nil,
-        (T("settings"), "⌘,"), (T("setup_menu"), ""), ("Log", ""), (T("quit_meetrec"), "⌘Q"),
+        (T("settings"), "⌘,"), (T("setup_menu"), ""), ("Log", ""),
+        ("MeetRec " + (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"), ""),
+        (T("quit_meetrec"), "⌘Q"),
     ]
     let itemsH = rows.reduce(CGFloat(0)) { $0 + ($1 == nil ? sepH : rowH) }
     let menuView = FlippedView(frame: NSRect(x: 0, y: 0, width: lv.frame.width, height: lv.frame.height + itemsH + pad * 2))

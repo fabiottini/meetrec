@@ -23,7 +23,10 @@ final class CallWatcher {
                                   "com.apple.corespeech", "com.apple.dictation", "com.apple.accessibility"]
 
     func start() {
-        timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.tick() }
+        let t = Timer(timeInterval: 3, repeats: true) { [weak self] _ in self?.tick() }
+        t.tolerance = 1                      // a call is noticed within a few seconds; let macOS batch wake-ups
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
     }
 
     private func addr(_ s: AudioObjectPropertySelector) -> AudioObjectPropertyAddress {
@@ -81,7 +84,7 @@ final class CallWatcher {
         if let app = users.first {
             inactiveSince = nil
             if activeSince == nil { activeSince = now }
-            if !inCall, now.timeIntervalSince(activeSince!) >= 4 {
+            if !inCall, now.timeIntervalSince(activeSince!) >= 3 {
                 inCall = true
                 callApp = app
                 onCallStart?(app)

@@ -7,7 +7,9 @@ CLI    := $(HOME)/.local/bin/meet
 PYTHON ?= $(shell command -v /opt/homebrew/bin/python3 || command -v python3)
 
 .DEFAULT_GOAL := help
-.PHONY: help build install install-zip open cli check docs release uninstall clean
+VERSION := $(shell tr -d ' \n' < VERSION)
+
+.PHONY: help build install install-zip open cli check docs release uninstall clean version bump-patch bump-minor bump-major tag
 
 help: ## list the targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  make %-12s %s\n", $$1, $$2}'
@@ -49,7 +51,8 @@ docs: build ## render the README images (docs/*.png) from the app, in English
 	ffmpeg -loglevel error -y -i docs/settings.png -vf "crop=iw:ih-24:0:0" docs/settings.tmp.png && mv docs/settings.tmp.png docs/settings.png
 
 release: check docs ## check + build + docs; then commit (zip and docs included), push a branch, open the MR
-	@echo "ready: commit dist/MeetRec.zip and docs/ with the code, push a branch, open the merge request"
+	@grep -q "^## $(VERSION) " CHANGELOG.md || echo "remember: CHANGELOG.md section for $(VERSION) (and make bump-* if needed)"
+	@echo "ready: commit dist/MeetRec.zip and docs/ with the code, push a branch, open the merge request; after the merge: make tag"
 
 uninstall: ## remove the app and the meet command (config, tokens and recordings are kept)
 	-@pkill -x MeetRec
@@ -58,3 +61,26 @@ uninstall: ## remove the app and the meet command (config, tokens and recordings
 
 clean: ## remove the build folder dist/MeetRec.app (the zip stays)
 	@if [ -d "$(APP)" ]; then rm -r "$(APP)"; fi
+
+version: ## print the version (VERSION file, semver)
+	@echo $(VERSION)
+
+bump-patch: ## 1.2.3 -> 1.2.4 (fixes)
+	@$(PYTHON) -c "v=open('VERSION').read().split('.'); v=[int(x) for x in v]; v[2]+=1; open('VERSION','w').write('.'.join(map(str,v))+'\n')" && cat VERSION
+
+bump-minor: ## 1.2.3 -> 1.3.0 (new features)
+	@$(PYTHON) -c "v=[int(x) for x in open('VERSION').read().split('.')]; v=[v[0],v[1]+1,0]; open('VERSION','w').write('.'.join(map(str,v))+'\n')" && cat VERSION
+
+bump-major: ## 1.2.3 -> 2.0.0 (breaking changes)
+	@$(PYTHON) -c "v=[int(x) for x in open('VERSION').read().split('.')]; v=[v[0]+1,0,0]; open('VERSION','w').write('.'.join(map(str,v))+'\n')" && cat VERSION
+
+tag: ## after the merge, on main: create and push the tag v$(VERSION)
+	@git fetch -q origin
+	@test "$$(git rev-parse --abbrev-ref HEAD)" = main || { echo "switch to main first"; exit 1; }
+	@test -z "$$(git status --porcelain)" || { echo "uncommitted changes"; exit 1; }
+	@test "$$(git rev-parse HEAD)" = "$$(git rev-parse origin/main)" || { echo "main is not up to date with origin (git pull)"; exit 1; }
+	@! git rev-parse -q --verify "refs/tags/v$(VERSION)" >/dev/null || { echo "tag v$(VERSION) already exists: bump the version"; exit 1; }
+	@grep -q "^## $(VERSION) " CHANGELOG.md || { echo "CHANGELOG.md has no section for $(VERSION)"; exit 1; }
+	@unzip -p $(ZIP) MeetRec.app/Contents/Resources/VERSION | grep -qx "$(VERSION)" || { echo "dist/MeetRec.zip is not version $(VERSION): make build and commit"; exit 1; }
+	git tag -a "v$(VERSION)" -m "MeetRec $(VERSION)"
+	git push origin "v$(VERSION)"

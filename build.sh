@@ -16,13 +16,18 @@ universal() {   # universal <output> <sources...>
   lipo -create -output "$out" "$TMP/arm64" "$TMP/x86_64"
 }
 
-echo "==> build"
+echo "==> build $(tr -d ' \n' < VERSION)"
 [[ -d "$APP" ]] && rm -r "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 universal "$APP/Contents/MacOS/meetrec-capture" capture/main.swift shared/MicVolume.swift
 universal "$APP/Contents/MacOS/meetrec-events" helpers/events.swift
 universal "$APP/Contents/MacOS/MeetRec" menubar/main.swift menubar/LevelPanel.swift menubar/Setup.swift menubar/MicMute.swift menubar/CallWatcher.swift shared/MicVolume.swift
 cp menubar/Info.plist "$APP/Contents/Info.plist"
+VERSION=$(tr -d ' \n' < VERSION)
+BUILD_NUMBER=$(git rev-list --count HEAD 2>/dev/null || echo 1)
+plutil -replace CFBundleShortVersionString -string "$VERSION" "$APP/Contents/Info.plist"
+plutil -replace CFBundleVersion -string "$BUILD_NUMBER" "$APP/Contents/Info.plist"
+cp VERSION "$APP/Contents/Resources/VERSION"
 cp assets/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cp meet.py "$APP/Contents/Resources/meet.py"
 cp -R locales "$APP/Contents/Resources/locales"
