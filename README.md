@@ -29,6 +29,12 @@ to disk while you record, so a crash does not lose it.
 - **Call detection**: when a call starts (another app opens the microphone), a small prompt offers
   **Record**, with the meeting title if a calendar has it; when the call ends while recording, it
   offers **Stop and process**.
+- **Choose what to record**: your voice and the others, or only your voice; transcript separate
+  (you / others) or single (from the mix).
+- **Voice profiles**: alter the voice in the saved audio (higher, deeper, robot, radio) so a listener
+  cannot tell who spoke, while the transcript stays correct.
+- **Keep or delete the audio** after the transcript, only once the note and the transcript are
+  checked.
 - **Mute switch**: mutes the microphone for every app (Teams included) until you switch it off.
 - **Local transcription** with whisper.cpp (large-v3-turbo) and a silence filter. The audio stays on
   your Mac.
@@ -141,6 +147,36 @@ processing, stop and discard (asks for confirmation, deletes the audio), recordi
 (each one can be processed or deleted), open the last note in Obsidian, recordings folder, log,
 settings, setup.
 
+### Recording options, voice profiles, audio after the transcript
+
+Defaults are in **Settings > Recording and audio**; **Start with options…** in the menu changes them
+for one recording (title, what to record, transcript, voice profile).
+
+- **What to record**: *My voice and the others* (two tracks, as usual) or *Only my voice* (no system
+  audio).
+- **Transcript**: *Separate* (You / Others, from the two tracks) or *Single* (one transcript from the
+  mix, speakers not separated).
+- **Voice profile**: changes the voice in the **saved** audio. The transcript is made on the
+  original first, then the original audio is replaced (never kept). Apply it to *only my voice* or
+  *all voices*; **Try** records 5 seconds from your mic and plays original and profile.
+
+  | Profile | Effect | Same words as the original voice* |
+  |---|---|---|
+  | 1 – higher | pitch and formants up, frequencies shifted | 96% |
+  | 2 – deeper | pitch and formants down, shifted, chorus | 93% |
+  | 3 – robot | intonation removed, slightly higher | 89% |
+  | 4 – radio | narrow band, higher, vibrato, grainy | 92% |
+
+  \*whisper on 60 s of a real call. Profiles hide the timbre, not the content: people who know you
+  may still recognise how you talk. Profiles 1 and 2 only shift pitch and can be partly undone;
+  3 and 4 throw information away and are harder to reverse.
+- **Audio after the transcript**: *Ask every time* (default), *Always keep*, or *Always delete*.
+  Before deleting, MeetRec checks that the note exists in the vault with its transcript section,
+  that the transcript is not empty and that the saved transcription files are there; if anything is
+  missing the audio is kept and you are told why. Only audio files are deleted: transcript, saved
+  transcription and note stay, so `meet process` can still rebuild the note. In the note the
+  recording link becomes "Audio eliminato dopo la trascrizione il …".
+
 ### Call detection
 
 When another app keeps the microphone open for a few seconds (Teams, Zoom, Meet in a browser,
@@ -171,6 +207,10 @@ meet start [-t "title"]   # record in the background
 meet status
 meet stop                 # stop, transcribe, find the event, write the note
 meet stop --discard       # stop and delete the recording
+meet start --mic-only | --with-system  [--transcript separate|mixed] [--voice-profile p1..p4] [--voice-scope mine|all]
+meet verify <folder>      # check note + transcript of a processed recording
+meet drop-audio <folder>  # delete its audio (only if verify is OK)
+meet voice-test p1..p4    # hear a voice profile on 5 seconds of your mic
 meet discard <folder>     # delete a recording (e.g. from meet recover)
 meet rec                  # in the foreground, Ctrl-C to stop
 meet recover              # recordings never processed (crash, reboot)
@@ -269,6 +309,11 @@ microphone: 16 kHz, narrow band, often very quiet. Whisper makes many more mista
 | `summary` | `true` | |
 | `summary_cmd` | `["claude","-p","--model","sonnet"]` | the prompt is sent on stdin |
 | `keep_raw` | `false` | also keeps the raw PCM |
+| `record_system` | `true` | `false`: record only my voice |
+| `transcript_mode` | `separate` | `separate` (you / others) or `mixed` (one transcript from the mix) |
+| `voice_profile` | `none` | `p1`…`p4`: alter the voice in the saved audio |
+| `voice_profile_scope` | `mine` | `mine` (only my voice) or `all` |
+| `after_process_audio` | `ask` | `ask`, `keep`, `delete` (delete only after the check) |
 | `call_prompt` | `true` | offer to record when a call starts, and to stop when it ends |
 | `keep_tracks` | `false` | also keeps `mic.m4a` and `system.m4a` after processing; otherwise only `mix.m4a` is kept |
 | `whisper_bin`, `whisper_model`, `vad_model` | found automatically | whisper.cpp and models (`~/Library/Application Support/MeetRec/models`) |

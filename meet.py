@@ -4,6 +4,8 @@
   meet start [-t TITLE]     start recording in background (mic + system audio)
   meet stop [--no-process | --discard]   stop and process (transcript + note), or stop and delete
   meet discard DIR          delete a recording folder
+  meet verify DIR / meet drop-audio DIR   check a processed recording / delete its audio (only if OK)
+  meet voice-test p1..p4    hear a voice profile on a few seconds of your microphone
   meet rec [-t TITLE]       foreground: record until Ctrl-C, then process
   meet status               current recording
   meet process DIR          (re)process a recording folder
@@ -80,6 +82,11 @@ DEFAULTS = {
     "summary_cmd": ["claude", "-p", "--model", "sonnet"],
     "keep_raw": False,
     "keep_tracks": False,                              # keep mic.m4a/system.m4a after processing (mix.m4a is always kept)
+    "record_system": True,                             # False: record only my voice (no system audio)
+    "transcript_mode": "separate",                     # separate: me / others from the two tracks; mixed: one track from the mix
+    "voice_profile": "none",                           # none | p1 | p2 | p3 | p4: alter the voice in the saved audio
+    "voice_profile_scope": "mine",                     # mine: only my voice; all: every voice
+    "after_process_audio": "ask",                      # ask | keep | delete (delete only after the result is verified)
     # Microsoft Graph (calendar). Same public client used by the ms365 MCP server.
     "ms_client_id": "084a3e9f-a9f4-43f7-89f9-d229cf97853e",
     "ms_authority": "https://login.microsoftonline.com/organizations",
@@ -88,7 +95,8 @@ DEFAULTS = {
 
 
 USER_KEYS = ["recordings_dir", "vault", "meetings_dir", "people_dir", "context", "language", "me",
-             "others_label", "mic_id", "auto_gain", "summary", "keep_raw", "keep_tracks"]
+             "others_label", "mic_id", "auto_gain", "summary", "keep_raw", "keep_tracks", "record_system",
+             "transcript_mode", "voice_profile", "voice_profile_scope", "after_process_audio"]
 
 
 def load_conf():
@@ -154,6 +162,13 @@ def cmd_start(a):
     cmd = [C["capture_bin"], str(d)]
     if a.no_mic:
         cmd.append("--no-mic")
+    record_system = C["record_system"]
+    if a.mic_only:
+        record_system = False
+    if a.with_system:
+        record_system = True
+    if not record_system:
+        cmd.append("--no-system")
     if C.get("mic_id"):
         cmd += ["--mic-id", C["mic_id"]]
     if C.get("auto_gain", True):
@@ -164,7 +179,10 @@ def cmd_start(a):
     subprocess.Popen(["caffeinate", "-i", "-w", str(p.pid)], start_new_session=True,
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     meta = {"started_at": start.isoformat(timespec="seconds"), "title": a.title, "pid": p.pid,
-            "language": a.lang or C["language"]}
+            "language": a.lang or C["language"], "record_system": record_system,
+            "transcript_mode": a.transcript or C["transcript_mode"],
+            "voice_profile": a.voice_profile or C["voice_profile"],
+            "voice_profile_scope": a.voice_scope or C["voice_profile_scope"]}
     write_json(d / "meta.json", meta)
     for _ in range(50):
         time.sleep(0.1)
@@ -1293,6 +1311,8 @@ def write_note(d, meta, event, turns, single_track, summary_line, summary_body):
     fm += [f"  - {yq(p)}" for p in people]
     fm += ["tags: []", f"time: {yq(f'{rec_start:%H:%M}-{rec_end:%H:%M}')}", f"duration_min: {dur}",
            f"recording: {yq(str(d / 'mix.m4a'))}", "source: " + ("meetrec-import" if meta.get("source_file") else "meetrec")]
+    if meta.get("voice_profile_applied"):
+        fm.append(f"voice_profile: {meta['voice_profile_applied']}")
     if meta.get("source_file"):
         fm.append(f"source_file: {yq(meta['source_file'])}")
     if event:
@@ -1324,7 +1344,11 @@ def write_note(d, meta, event, turns, single_track, summary_line, summary_body):
         body.append("")
     else:
         body += ["_Nessun evento di calendario trovato per questo orario._", ""]
-    body += [f"Registrazione: `{d / 'mix.m4a'}` ({dur} min, dalle {rec_start:%H:%M} alle {rec_end:%H:%M}).", ""]
+    altered = ""
+    if meta.get("voice_profile_applied"):
+        altered = (" Voce alterata (" + VOICE_PROFILES[meta["voice_profile_applied"]][0]
+                   + (", solo la mia" if meta.get("voice_profile_scope") == "mine" and meta.get("record_system", True) else ", tutte le voci") + ").")
+    body += [f"Registrazione: `{d / 'mix.m4a'}` ({dur} min, dalle {rec_start:%H:%M} alle {rec_end:%H:%M}).{altered}", ""]
     if meta.get("source_file"):
         body += [f"Importata dal file `{meta['source_file']}`.", ""]
     if summary_body:
@@ -1355,6 +1379,13 @@ def process(d):
     if not tracks:
         say("no audio found")
         return 1
+    if opt(meta, "transcript_mode") == "mixed" and set(tracks) == {"mic", "system"}:
+        # one transcript from the mix (speakers not separated), as chosen for this recording
+        if not (d / "mix.segments.json").exists() and not (d / "mix.wav").exists():
+            ff("-i", str(d / "mix.m4a"), "-ar", "16000", "-ac", "1", str(d / "mix.wav"))
+        for n in tracks:
+            (d / f"{n}.wav").unlink(missing_ok=True)
+        tracks = ["mix"]
     segs = transcribe(d, tracks, meta.get("language") or C["language"])
     levels = {n: track_levels(d, n) for n in tracks}
     turns = merge(segs, levels)
@@ -1368,8 +1399,12 @@ def process(d):
     title = meta.get("title") or (event or {}).get("subject") or "meeting"
     plain = "\n".join(f"[{hms(t['start'])}] {t['speaker']}: {t['text']}" for t in turns)
     one, body = summarize(title, event, plain) if turns else (None, None)
+    apply_voice_profile(d, meta)          # transcription was made on the original audio
+    meta = read_json(d / "meta.json", meta)
     note = write_note(d, meta, event, turns, single, one, body)
     meta["note"] = str(note)
+    meta["turns"] = len(turns)
+    meta["tracks"] = tracks
     meta["processed_at"] = now().isoformat(timespec="seconds")
     write_json(d / "meta.json", meta)
     for n in tracks:
@@ -1382,6 +1417,175 @@ def process(d):
         if removed:
             say("separate tracks removed, mix.m4a kept")
     say(f"note: {note}")
+    after_process_audio(d, meta)
+    return 0
+
+
+# ---------------------------------------------------------------- audio after the transcript
+
+def opt(meta, key):
+    """per-recording choice (meta.json), else the config default"""
+    v = meta.get(key)
+    return C[key] if v is None else v
+
+
+def verify_processed(d):
+    """(ok, reason): the note and the transcript really exist, so the audio can go"""
+    meta = read_json(d / "meta.json", {})
+    if not meta.get("processed_at"):
+        return False, "not processed"
+    note = Path(meta.get("note") or "")
+    if not note.is_file():
+        return False, f"note not found: {note}"
+    text = note.read_text()
+    if "## Trascrizione" not in text:
+        return False, "the note has no transcript section"
+    if int(meta.get("turns") or 0) <= 0 or not re.search(r"^`\d\d:\d\d:\d\d`", text, re.M):
+        return False, "the transcript is empty"
+    tr = d / "transcript.md"
+    if not tr.is_file() or tr.stat().st_size == 0:
+        return False, "transcript.md missing or empty"
+    for n in meta.get("tracks") or []:
+        if not (d / f"{n}.segments.json").is_file():
+            return False, f"saved transcription of {n} missing"
+    return True, f"{meta['turns']} transcript lines in {note.name}"
+
+
+def drop_audio(d):
+    d = Path(d).expanduser().resolve()
+    ok, why = verify_processed(d)
+    if not ok:
+        say(f"audio kept: {why}")
+        return 1
+    meta = read_json(d / "meta.json", {})
+    secs = probe_duration(d / "mix.m4a")
+    for pat in ("*.m4a", "*.wav", "*.s16"):
+        for f in d.glob(pat):
+            f.unlink()
+    note = Path(meta["note"])
+    today = dt.date.today()
+    text = note.read_text()
+    text = re.sub(r'^recording: .*$', f'recording: ""\naudio_deleted: {today}', text, count=1, flags=re.M)
+    text = re.sub(r"^Registrazione: `.*$",
+                  f"Audio eliminato dopo la trascrizione il {today:%d/%m/%Y} ({secs / 60:.0f} min).", text, count=1, flags=re.M)
+    note.write_text(text)
+    meta["audio_deleted_at"] = now().isoformat(timespec="seconds")
+    write_json(d / "meta.json", meta)
+    say(f"audio deleted ({why}); transcript and note kept")
+    return 0
+
+
+def after_process_audio(d, meta):
+    policy = opt(meta, "after_process_audio")
+    if policy == "delete":
+        drop_audio(d)
+    elif policy == "ask" and sys.stdin.isatty():
+        ok, why = verify_processed(d)
+        if not ok:
+            say(f"audio kept: {why}")
+            return
+        ans = input(f"Transcript OK ({why}). Delete the audio? [y/N] > ").strip().lower()
+        if ans in ("y", "s", "yes", "si", "sì"):
+            drop_audio(d)
+
+
+def cmd_verify(a):
+    ok, why = verify_processed(Path(a.dir).expanduser().resolve())
+    print(("OK: " if ok else "NOT OK: ") + why)
+    return 0 if ok else 1
+
+
+def cmd_drop_audio(a):
+    return drop_audio(a.dir)
+
+
+# ---------------------------------------------------------------- voice profiles
+#
+# Alter the voice in the saved audio so a listener cannot tell who spoke, while the words stay
+# clear (whisper still got 89-96% of the same words on a real call). Transcription is made on the
+# original audio first; the original is then replaced. Profiles 1-2 only shift pitch and formants
+# (partly reversible); 3 (robot) and 4 (radio) throw information away and are harder to undo.
+
+VOICE_PROFILES = {
+    "p1": ("Profile 1: higher", "aresample=48000,asetrate=48000*1.19,aresample=48000,atempo=1/1.19,afreqshift=shift=60"),
+    "p2": ("Profile 2: deeper", "aresample=48000,asetrate=48000*0.84,aresample=48000,atempo=1/0.84,"
+                                "afreqshift=shift=-50,chorus=0.6:0.9:40:0.3:0.25:2"),
+    "p3": ("Profile 3: robot", "aresample=48000,afftfilt=real='hypot(re,im)':imag='0':win_size=512:overlap=0.75,"
+                               "asetrate=48000*1.12,aresample=48000,atempo=1/1.12"),
+    "p4": ("Profile 4: radio", "aresample=48000,asetrate=48000*1.26,aresample=48000,atempo=1/1.26,"
+                               "bandpass=f=1600:width_type=h:w=2800,vibrato=f=6:d=0.15,acrusher=bits=10:mode=log:aa=1"),
+}
+
+
+def alter(src, dst, profile):
+    ff("-i", str(src), "-af", VOICE_PROFILES[profile][1], "-c:a", "aac", "-b:a", "96k", str(dst))
+
+
+def replace_checked(new, old):
+    """replace old with new only if the durations match (never lose audio to a failed filter)"""
+    if abs(probe_duration(new) - probe_duration(old)) > 3:
+        new.unlink(missing_ok=True)
+        say(f"voice profile: duration mismatch on {old.name}, original kept")
+        return False
+    new.replace(old)
+    return True
+
+
+def apply_voice_profile(d, meta):
+    profile = opt(meta, "voice_profile")
+    if profile not in VOICE_PROFILES or meta.get("voice_profile_applied") == profile:
+        return
+    scope = opt(meta, "voice_profile_scope")
+    mic, system, mix = d / "mic.m4a", d / "system.m4a", d / "mix.m4a"
+    if scope == "mine" and mic.exists() and system.exists():
+        alter(mic, d / "mic.alt.m4a", profile)
+        ff("-i", str(d / "mic.alt.m4a"), "-i", str(system), "-filter_complex",
+           "[0:a]aresample=48000[a];[1:a]aresample=48000[b];[a][b]amix=inputs=2:normalize=0",
+           "-c:a", "aac", "-b:a", "96k", str(d / "mix.alt.m4a"))
+        ok = replace_checked(d / "mix.alt.m4a", mix)
+        if ok:
+            replace_checked(d / "mic.alt.m4a", mic)
+        else:
+            (d / "mic.alt.m4a").unlink(missing_ok=True)
+    else:
+        # my voice only (no system track) or every voice, or an imported file: the whole mix
+        alter(mix, d / "mix.alt.m4a", profile)
+        ok = replace_checked(d / "mix.alt.m4a", mix)
+        for t in (mic, system):
+            if ok and t.exists():
+                alter(t, d / f"{t.stem}.alt.m4a", profile)
+                replace_checked(d / f"{t.stem}.alt.m4a", t)
+    if ok:
+        meta["voice_profile_applied"] = profile
+        write_json(d / "meta.json", meta)
+        say(f"voice altered in the saved audio: {VOICE_PROFILES[profile][0]} ({'my voice' if scope == 'mine' else 'all voices'})")
+
+
+def cmd_voice_test(a):
+    """record a few seconds from the mic, then play the original and the profile"""
+    import tempfile
+    if a.profile not in VOICE_PROFILES:
+        say(f"profiles: {', '.join(VOICE_PROFILES)}")
+        return 1
+    t = Path(tempfile.mkdtemp(prefix="meetrec-voice-"))
+    cmd = [C["capture_bin"], str(t / "r"), "--no-system"] + (["--mic-id", C["mic_id"]] if C.get("mic_id") else [])
+    say(f"speak now: recording {a.seconds} seconds…")
+    p = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    time.sleep(a.seconds)
+    p.send_signal(signal.SIGINT)
+    p.wait(timeout=10)
+    raw = sorted((t / "r").glob("mic*.json"))
+    if not raw:
+        say("no audio recorded (microphone permission?)")
+        return 1
+    m = read_json(raw[0])
+    ff("-f", "s16le", "-ar", str(m["sample_rate"]), "-ac", "1", "-i", str(raw[0].with_suffix(".s16")), str(t / "orig.wav"))
+    ff("-i", str(t / "orig.wav"), "-af", VOICE_PROFILES[a.profile][1], str(t / "alt.wav"))
+    say("original…")
+    subprocess.run(["afplay", str(t / "orig.wav")])
+    say(f"{VOICE_PROFILES[a.profile][0]}…")
+    subprocess.run(["afplay", str(t / "alt.wav")])
+    shutil.rmtree(t)
     return 0
 
 
@@ -1422,7 +1626,8 @@ def cmd_import(a):
     write_json(d / "meta.json", {
         "started_at": start.isoformat(timespec="seconds"),
         "stopped_at": (start + dt.timedelta(seconds=secs)).isoformat(timespec="seconds"),
-        "title": a.title, "language": a.lang or C["language"], "source_file": str(src)})
+        "title": a.title, "language": a.lang or C["language"], "source_file": str(src),
+        "voice_profile": C["voice_profile"], "voice_profile_scope": "all"})
     say(f"recording folder -> {d}")
     if a.no_process:
         return 0
@@ -1467,6 +1672,11 @@ def main():
         s.add_argument("-t", "--title", help="title (default: from Outlook calendar)")
         s.add_argument("-l", "--lang", help="language, default from config (it)")
         s.add_argument("--no-mic", action="store_true", help="system audio only")
+        s.add_argument("--mic-only", action="store_true", help="record only my voice (no system audio)")
+        s.add_argument("--with-system", action="store_true", help="record my voice and the system audio")
+        s.add_argument("--transcript", choices=["separate", "mixed"], help="separate (me / others) or mixed")
+        s.add_argument("--voice-profile", choices=["none"] + list(VOICE_PROFILES), help="alter the voice in the saved audio")
+        s.add_argument("--voice-scope", choices=["mine", "all"], help="voice profile on my voice only, or on all voices")
     s = sub.add_parser("stop")
     s.add_argument("--no-process", action="store_true")
     s.add_argument("--discard", action="store_true", help="stop and delete the recording")
@@ -1510,10 +1720,18 @@ def main():
     s = sub.add_parser("events")
     s.add_argument("date", nargs="?")
     sub.add_parser("mics")
+    s = sub.add_parser("verify", help="check that a recording was processed correctly (note + transcript)")
+    s.add_argument("dir")
+    s = sub.add_parser("drop-audio", help="delete the audio of a processed recording (only if verify is OK)")
+    s.add_argument("dir")
+    s = sub.add_parser("voice-test", help="record a few seconds and play them with a voice profile")
+    s.add_argument("profile")
+    s.add_argument("--seconds", type=int, default=5)
     a = p.parse_args()
     return {"start": cmd_start, "rec": cmd_rec, "stop": cmd_stop, "discard": cmd_discard, "status": cmd_status, "process": cmd_process, "import": cmd_import,
             "recover": cmd_recover, "candidates": cmd_candidates, "choose": cmd_choose,
-            "accounts": cmd_accounts, "now": cmd_now, "account": cmd_account, "login": cmd_login, "logout": cmd_logout, "whoami": cmd_whoami, "events": cmd_events, "mics": cmd_mics}[a.cmd](a)
+            "accounts": cmd_accounts, "now": cmd_now, "account": cmd_account, "login": cmd_login, "logout": cmd_logout, "whoami": cmd_whoami, "events": cmd_events, "mics": cmd_mics,
+            "verify": cmd_verify, "drop-audio": cmd_drop_audio, "voice-test": cmd_voice_test}[a.cmd](a)
 
 
 if __name__ == "__main__":
