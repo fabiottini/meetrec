@@ -22,12 +22,20 @@ sealed class TrayApp : ApplicationContext
     Icon? currentIcon;
     /// set only by --render-docs: draw the menu of a recording without recording
     public DateTimeOffset? DocsRecording;
+    public readonly LevelPanel Levels;
+    readonly ToolStripControlHost levelHost;
+    DateTime lastMuteTick = DateTime.MinValue;
 
     public TrayApp(bool show = true)
     {
         LastNote = AppState.Load()["lastNote"]?.GetValue<string>();
         Menu.Opening += (_, e) => { BuildMenu(); e.Cancel = false; };
         Menu.ShowImageMargin = false;
+        Levels = new LevelPanel(this);
+        levelHost = new ToolStripControlHost(Levels) { AutoSize = false, Size = Levels.Size, Margin = Padding.Empty, Padding = Padding.Empty };
+        Levels.OnMuteToggled = ToggleMute;
+        Menu.Opened += (_, _) => Levels.Open();
+        Menu.Closed += (_, _) => Levels.Close();
         Tray.ContextMenuStrip = Menu;
         Tray.Text = "MeetRec";
         // left click opens the same menu (right click does it by itself)
@@ -84,6 +92,12 @@ sealed class TrayApp : ApplicationContext
     /// icon and tooltip; the timer runs every 2 s when idle and 4 times a second while recording
     public void Refresh()
     {
+        if ((DateTime.Now - lastMuteTick).TotalSeconds >= 1 && DocsRecording == null)
+        {
+            lastMuteTick = DateTime.Now;
+            MicMute.Tick();
+        }
+        bool muted = MicMute.Enabled;
         var c = Cur();
         string key, tip;
         Func<Bitmap> make;
@@ -92,8 +106,8 @@ sealed class TrayApp : ApplicationContext
         {
             var db = MicDb(c.Dir);
             int bucket = (int)Math.Clamp((db + 60) / 6, 0, 8);
-            key = c.Alive ? $"rec-{bucket}" : "dead";
-            make = () => c.Alive ? Icons.Glyph(size, Color.FromArgb(0xE5, 0x39, 0x35), db) : Icons.Glyph(size, Color.FromArgb(0xF5, 0x8A, 0x00), null);
+            key = c.Alive ? $"rec-{bucket}-{muted}" : "dead";
+            make = () => c.Alive ? Icons.Glyph(size, Color.FromArgb(0xE5, 0x39, 0x35), db, muted) : Icons.Glyph(size, Color.FromArgb(0xF5, 0x8A, 0x00), null);
             tip = $"MeetRec – {T("recording")} {Elapsed(c.Start)}" + (c.Title != null ? " – " + c.Title : "");
         }
         else if (Processing)
@@ -103,7 +117,7 @@ sealed class TrayApp : ApplicationContext
         }
         else
         {
-            key = "idle"; make = () => Icons.Glyph(size, null, null);
+            key = $"idle-{muted}"; make = () => Icons.Glyph(size, null, null, muted);
             tip = "MeetRec – " + T("ready");
         }
         key += Icons.DarkTaskbar() ? "-d" : "-l";
@@ -117,7 +131,7 @@ sealed class TrayApp : ApplicationContext
             lastIconKey = key;
         }
         Tray.Text = tip.Length > 127 ? tip[..124] + "…" : tip;
-        int want = c?.Alive == true ? 250 : Processing ? 1000 : 2000;
+        int want = c?.Alive == true ? 250 : Processing || muted ? 1000 : 2000;
         if (timer.Interval != want || !timer.Enabled) { timer.Interval = want; timer.Start(); }
     }
 
@@ -152,6 +166,11 @@ sealed class TrayApp : ApplicationContext
         var m = Menu.Items;
         var c = Cur();
         var hk = hotkey.Display;
+        m.Add(levelHost);
+        var mi = new ToolStripMenuItem(T("mute_mic_menu")) { Checked = MicMute.Enabled };
+        mi.Click += (_, _) => ToggleMute();
+        m.Add(mi);
+        m.Add(new ToolStripSeparator());
         if (c != null)
         {
             var head = T("recording_for") + Elapsed(c.Start);
@@ -219,6 +238,14 @@ sealed class TrayApp : ApplicationContext
 
     public Action? SettingsHook, SetupHook;
 
+    public void ToggleMute()
+    {
+        MicMute.Enabled = !MicMute.Enabled;
+        MicMute.Tick();
+        lastIconKey = "";
+        Refresh();
+    }
+
     // ---------------------------------------------------------------- actions
 
     string? balloonNote;
@@ -232,13 +259,14 @@ sealed class TrayApp : ApplicationContext
     bool ConsentAcknowledged()
     {
         if (AppState.Load()["consentAcknowledged"]?.GetValue<bool>() == true) return true;
-        if (new Alert(T("consent_title"), T("consent_text")).Buttons(true, T("consent_ok"), T("cancel")).Run() != 0) return false;
+        if (new Alert(T("consent_title"), T("consent_text_win")).Buttons(true, T("consent_ok"), T("cancel")).Run() != 0) return false;
         AppState.Set("consentAcknowledged", true);
         return true;
     }
 
     public void StartRecording(string? title, IEnumerable<string>? extra = null)
     {
+        CallPrompt.Hide_();
         if (!ConsentAcknowledged()) return;
         var args = new List<string> { "start" };
         if (title != null) args.AddRange(new[] { "-t", title });
@@ -341,7 +369,7 @@ sealed class TrayApp : ApplicationContext
         {
             bool known = AppState.Load()["consentAcknowledged"]?.GetValue<bool>() == true;
             StartRecording(null);
-            if (known) Notify("MeetRec", T("hotkey_started"));
+            if (known) Notify("MeetRec", T("hotkey_started_win", ("keys", hotkey.Display)));
         }
     }
 
@@ -381,6 +409,7 @@ sealed class TrayApp : ApplicationContext
     protected override void ExitThreadCore()
     {
         BeforeExit?.Invoke();
+        MicMute.RestoreAll();                 // never leave the mic muted without the app
         hotkey.Dispose();
         Tray.Visible = false;
         Tray.Dispose();

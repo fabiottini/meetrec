@@ -536,7 +536,7 @@ static class Guides
             list.Controls.Add(new Label { Text = (i + 1).ToString(), AutoSize = true, Font = new Font(f.Font, FontStyle.Bold), Margin = new Padding(8, 4, 0, 0) });
             var text = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false, Margin = new Padding(0, 2, 0, 10) };
             text.Controls.Add(new Label { Text = L.T(t), AutoSize = true, Font = new Font(f.Font, FontStyle.Bold) });
-            text.Controls.Add(new TextBox { Text = L.T(x), ReadOnly = true, BorderStyle = BorderStyle.None, Multiline = true, Width = 470, BackColor = SystemColors.Control,
+            text.Controls.Add(new TextBox { Text = L.T(x), ReadOnly = true, TabStop = false, BorderStyle = BorderStyle.None, Multiline = true, Width = 470, BackColor = SystemColors.Control,
                                             Height = TextRenderer.MeasureText(L.T(x), f.Font, new Size(470, 0), TextFormatFlags.WordBreak).Height + 6 });
             list.Controls.Add(text);
             if (url != null)
@@ -564,8 +564,9 @@ static class Guides
         var cancel = new Button { Text = L.T("cancel"), AutoSize = true };
         id.TextChanged += (_, _) => ok.Enabled = id.Text.Trim().Length >= 36;
         row.Controls.Add(cancel); row.Controls.Add(id); row.Controls.Add(ok);
-        var f = Make(L.T("m_title"), L.T("m_intro"), MicrosoftSteps, row);
+        var f = Make(L.T("m_title"), L.T("m_intro_win"), MicrosoftSteps, row);
         f.AcceptButton = ok;
+        f.Shown += (_, _) => id.Focus();
         cancel.Click += (_, _) => f.Close();
         ok.Click += (_, _) => { save(id.Text.Trim()); f.Close(); };
         if (show) f.Show(owner);
@@ -580,6 +581,7 @@ static class Guides
         row.Controls.Add(cancel); row.Controls.Add(choose);
         var f = Make(L.T("g_title"), L.T("g_intro"), GoogleSteps, row);
         f.AcceptButton = choose;
+        f.Shown += (_, _) => choose.Focus();
         cancel.Click += (_, _) => f.Close();
         choose.Click += (_, _) =>
         {

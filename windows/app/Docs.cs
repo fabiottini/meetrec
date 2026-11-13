@@ -23,7 +23,7 @@ static class Docs
             { ["started_at"] = "2026-11-12T10:00:00+01:00", ["stopped_at"] = "2026-11-12T10:42:00+01:00" }, out _)),
         ("keep-audio", () => new Alert(T("keep_audio_title"), T("keep_audio_info", ("check", "note 4 KB, transcript 212 lines")))
             .Buttons(false, T("keep_audio"), T("delete_audio"))),
-        ("consent", () => new Alert(T("consent_title"), T("consent_text")).Buttons(true, T("consent_ok"), T("cancel"))),
+        ("consent", () => new Alert(T("consent_title"), T("consent_text_win")).Buttons(true, T("consent_ok"), T("cancel"))),
     };
 
     static void Save(Control c, string file)
