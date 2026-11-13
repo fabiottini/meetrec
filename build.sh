@@ -21,7 +21,7 @@ echo "==> build $(tr -d ' \n' < VERSION)"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 universal "$APP/Contents/MacOS/meetrec-capture" capture/main.swift shared/MicVolume.swift
 universal "$APP/Contents/MacOS/meetrec-events" helpers/events.swift
-universal "$APP/Contents/MacOS/MeetRec" menubar/main.swift menubar/LevelPanel.swift menubar/Setup.swift menubar/MicMute.swift menubar/CallWatcher.swift shared/MicVolume.swift
+universal "$APP/Contents/MacOS/MeetRec" menubar/main.swift menubar/LevelPanel.swift menubar/Setup.swift menubar/MicMute.swift menubar/CallWatcher.swift menubar/AudioEditor.swift shared/MicVolume.swift
 cp menubar/Info.plist "$APP/Contents/Info.plist"
 VERSION=$(tr -d ' \n' < VERSION)
 BUILD_NUMBER=$(git rev-list --count HEAD 2>/dev/null || echo 1)

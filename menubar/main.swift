@@ -702,7 +702,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 proc.target = self; proc.representedObject = r["dir"]
                 let del = NSMenuItem(title: T("delete_recording"), action: #selector(discardDir(_:)), keyEquivalent: "")
                 del.target = self; del.representedObject = r["dir"]
-                actions.addItem(proc); actions.addItem(del)
+                let ed = NSMenuItem(title: T("edit_audio"), action: processing ? nil : #selector(editDir(_:)), keyEquivalent: "")
+                ed.target = self; ed.representedObject = r["dir"]
+                actions.addItem(proc); actions.addItem(ed); actions.addItem(del)
                 item.submenu = actions
                 sub.addItem(item)
             }
@@ -949,7 +951,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             }
             RadioTarget.shared.onClick = pick
             radios[0].state = .on
-            stack.frame = NSRect(x: 0, y: 0, width: 460, height: CGFloat(radios.count) * 24)
+            // optional: instructions for Claude, and review/cut the audio before transcribing
+            let instr = NSTextField(string: "")
+            instr.placeholderString = T("instructions_placeholder")
+            instr.widthAnchor.constraint(equalToConstant: 460).isActive = true
+            let edit = NSButton(checkboxWithTitle: T("review_audio_first"), target: nil, action: nil)
+            stack.setCustomSpacing(14, after: radios.last!)
+            stack.addArrangedSubview(NSTextField(labelWithString: T("instructions_label")))
+            stack.addArrangedSubview(instr)
+            stack.addArrangedSubview(edit)
+            stack.frame = NSRect(x: 0, y: 0, width: 460, height: CGFloat(radios.count) * 24 + 90)
             a.accessoryView = stack
             a.addButton(withTitle: T("cal_use_this")); a.addButton(withTitle: T("cal_decide_later"))
             NSApp.activate(ignoringOtherApps: true)
@@ -959,16 +970,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 return
             }
             let tag = radios.first { $0.state == .on }?.tag ?? 1
+            let text = instr.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            let review = edit.state == .on
             if tag == -1 {
-                self.askManualEvent(dir)
+                self.askManualEvent(dir, instructions: text, review: review)
                 return
             }
-            self.runMeet2(["choose", dir, tag == 0 ? "none" : "\(tag)"]) { self.runPipeline(["process", dir]) }
+            self.runMeet2(["choose", dir, tag == 0 ? "none" : "\(tag)"]) {
+                self.continueToTranscript(dir, instructions: text, review: review)
+            }
         }
     }
 
     /// form for a meeting that is not in any calendar: title, day, start, end, attendees, agenda
-    func askManualEvent(_ dir: String) {
+    /// after the meeting is chosen: optional audio editor, then processing with the instructions
+    func continueToTranscript(_ dir: String, instructions: String, review: Bool) {
+        let process = { self.runPipeline(["process", dir] + (instructions.isEmpty ? [] : ["--instructions", instructions])) }
+        guard review else { process(); return }
+        openEditor(dir) { applied in
+            if applied { process() } else {
+                notify("MeetRec", T("cal_saved_for_later"))
+                self.loadRecover()
+            }
+        }
+    }
+
+    /// encode the raw audio, open the editor, apply the cuts; done(true) when there is something to transcribe
+    func openEditor(_ dir: String, done: @escaping (Bool) -> Void) {
+        processing = true
+        processingStep = T("editor_preparing")
+        refresh()
+        runMeet(["prepare", dir]) { status, out in
+            self.processing = false
+            self.refresh()
+            guard status == 0 else {
+                notify(T("processing_failed"), out.split(separator: "\n").last.map(String.init) ?? "")
+                done(false)
+                return
+            }
+            AudioEditor.open(dir: dir) { cuts in
+                guard let cuts else { done(false); return }
+                guard !cuts.isEmpty else { done(true); return }
+                let ranges = cuts.map { String(format: "%.2f-%.2f", $0.0, $0.1) }.joined(separator: ",")
+                runMeet(["cut", dir, ranges]) { st, o in
+                    if st != 0 { notify(T("processing_failed"), o.split(separator: "\n").last.map(String.init) ?? "") }
+                    done(st == 0)
+                }
+            }
+        }
+    }
+
+    @objc func editDir(_ sender: NSMenuItem) {
+        guard let d = sender.representedObject as? String else { return }
+        openEditor(d) { applied in if applied { self.chooseEventThenProcess(d) } else { self.loadRecover() } }
+    }
+
+    func askManualEvent(_ dir: String, instructions: String = "", review: Bool = false) {
         let meta = (try? JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: dir + "/meta.json")))) as? [String: Any] ?? [:]
         let isoIn = ISO8601DateFormatter()
         let start = (meta["started_at"] as? String).flatMap { isoIn.date(from: $0) } ?? Date()
@@ -1034,7 +1091,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                     "--start", iso.string(from: s1), "--end", iso.string(from: s2)]
         if !people.stringValue.isEmpty { args += ["--people", people.stringValue] }
         if !agenda.stringValue.isEmpty { args += ["--agenda", agenda.stringValue] }
-        runMeet2(args) { self.runPipeline(["process", dir]) }
+        runMeet2(args) { self.continueToTranscript(dir, instructions: instructions, review: review) }
     }
 
     func runMeet2(_ args: [String], then: @escaping () -> Void) { runMeet(args) { _, _ in then() } }
@@ -1417,7 +1474,14 @@ func renderDocs(_ dir: String, _ d: AppDelegate) {
         r.state = i == 0 ? .on : .off
         stack.addArrangedSubview(r)
     }
-    stack.frame = NSRect(x: 0, y: 0, width: 460, height: CGFloat(labels.count) * 24)
+    let instr = NSTextField(string: "")
+    instr.placeholderString = T("instructions_placeholder")
+    instr.widthAnchor.constraint(equalToConstant: 460).isActive = true
+    stack.setCustomSpacing(14, after: stack.arrangedSubviews.last!)
+    stack.addArrangedSubview(NSTextField(labelWithString: T("instructions_label")))
+    stack.addArrangedSubview(instr)
+    stack.addArrangedSubview(NSButton(checkboxWithTitle: T("review_audio_first"), target: nil, action: nil))
+    stack.frame = NSRect(x: 0, y: 0, width: 460, height: CGFloat(labels.count) * 24 + 90)
     which.accessoryView = stack
     which.addButton(withTitle: T("cal_use_this")); which.addButton(withTitle: T("cal_decide_later"))
     saveAlert(which, dir + "/tour-which-meeting.png")
@@ -1457,6 +1521,7 @@ func renderDocs(_ dir: String, _ d: AppDelegate) {
     keep.addButton(withTitle: T("keep_audio"))
     keep.addButton(withTitle: T("delete_audio")).hasDestructiveAction = true
     saveAlert(keep, dir + "/tour-keep-audio.png")
+    AudioEditor.renderDemo(dir + "/tour-editor.png")
 
 }
 
