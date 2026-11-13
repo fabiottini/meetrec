@@ -37,11 +37,32 @@ from pathlib import Path
 
 HOME = Path.home()
 APP_DIR = Path(__file__).resolve().parent
-CONF_DIR = HOME / ".config" / "meetrec"
-STATE_DIR = HOME / ".local" / "state" / "meetrec"
+IS_WIN = sys.platform == "win32"
+IS_MAC = sys.platform == "darwin"
+
+if IS_WIN:
+    # Windows: text files and the console in UTF-8 (the default code page breaks accents, → and …)
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+    _read_text, _write_text = Path.read_text, Path.write_text
+    Path.read_text = lambda self, encoding="utf-8", errors=None: _read_text(self, encoding=encoding, errors=errors)
+    Path.write_text = lambda self, data, encoding="utf-8", errors=None, newline=None: _write_text(
+        self, data, encoding=encoding, errors=errors, newline=newline)
+    _APPDATA = Path(os.environ.get("APPDATA") or HOME / "AppData" / "Roaming")
+    _LOCAL = Path(os.environ.get("LOCALAPPDATA") or HOME / "AppData" / "Local")
+    CONF_DIR = _APPDATA / "MeetRec"
+    STATE_DIR = _LOCAL / "MeetRec" / "state"
+else:
+    CONF_DIR = HOME / ".config" / "meetrec"
+    STATE_DIR = HOME / ".local" / "state" / "meetrec"
 CURRENT = STATE_DIR / "current.json"
 VIBE_SUPPORT = HOME / "Library/Application Support/github.com.thewh1teagle.vibe"
-DATA_DIR = HOME / "Library" / "Application Support" / "MeetRec"      # models downloaded by the app setup
+# models (and on Windows the tools) downloaded by the app setup
+DATA_DIR = (_LOCAL / "MeetRec") if IS_WIN else HOME / "Library" / "Application Support" / "MeetRec"
+EXE = ".exe" if IS_WIN else ""
 MODEL_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin"
 VAD_URL = "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin"
 
@@ -54,10 +75,12 @@ def first_existing(*paths):
 
 
 def find_capture():
-    # inside MeetRec.app: Contents/Resources/meet.py -> Contents/MacOS/meetrec-capture; in the repo: capture/
+    # macOS app: Contents/Resources/meet.py -> Contents/MacOS/meetrec-capture; Windows app: next to meet.py;
+    # in the repo: capture/
     return first_existing(os.environ.get("MEETREC_CAPTURE"),
                           APP_DIR.parent / "MacOS" / "meetrec-capture",
-                          APP_DIR / "capture" / "meetrec-capture")
+                          APP_DIR / f"meetrec-capture{EXE}",
+                          APP_DIR / "capture" / f"meetrec-capture{EXE}")
 
 DEFAULTS = {
     "recordings_dir": str(HOME / "Recordings" / "meetings"),
@@ -69,13 +92,15 @@ DEFAULTS = {
     "me": "Me",                                        # label for the mic track
     "others_label": "Altri",                           # label for the system-audio track
     # transcription: whisper.cpp (brew install whisper-cpp); Vibe only as a fallback if whisper-cli is missing
-    "whisper_bin": first_existing(shutil.which("whisper-cli"), "/opt/homebrew/bin/whisper-cli", "/usr/local/bin/whisper-cli"),
+    "whisper_bin": first_existing(shutil.which("whisper-cli"), DATA_DIR / "bin" / f"whisper-cli{EXE}",
+                                  "/opt/homebrew/bin/whisper-cli", "/usr/local/bin/whisper-cli"),
     "whisper_model": first_existing(DATA_DIR / "models" / "ggml-large-v3-turbo.bin", VIBE_SUPPORT / "ggml-large-v3-turbo.bin"),
     "vad_model": first_existing(DATA_DIR / "models" / "ggml-silero-v6.2.0.bin", VIBE_SUPPORT / "ggml-silero-v6.2.0.bin"),
     "whisper_threads": 4,                              # keeps the Mac responsive while transcribing
     "vibe_bin": "/Applications/vibe.app/Contents/MacOS/vibe",
     "vibe_model": str(VIBE_SUPPORT / "ggml-large-v3-turbo.bin"),
-    "ffmpeg": first_existing(shutil.which("ffmpeg"), "/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"),
+    "ffmpeg": first_existing(shutil.which("ffmpeg"), DATA_DIR / "bin" / f"ffmpeg{EXE}",
+                             "/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"),
     "capture_bin": find_capture(),
     "mic_id": None,
     "auto_gain": True,                                 # lower the mic input volume when it clips
@@ -142,11 +167,67 @@ def write_json(p, data):
 
 
 def pid_alive(pid):
+    if not pid:
+        return False
+    if IS_WIN:
+        # os.kill(pid, 0) on Windows sends CTRL_C_EVENT: ask the process table instead
+        import ctypes
+        k = ctypes.windll.kernel32
+        h = k.OpenProcess(0x1000, False, int(pid))          # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return False
+        code = ctypes.c_ulong()
+        ok = k.GetExitCodeProcess(h, ctypes.byref(code))
+        k.CloseHandle(h)
+        return bool(ok) and code.value == 259               # STILL_ACTIVE
     try:
         os.kill(pid, 0)
         return True
     except OSError:
         return False
+
+
+def spawn_detached(cmd, logf):
+    """start the recorder so it outlives the caller (terminal or app)"""
+    if IS_WIN:
+        flags = 0x00000200 | 0x08000000                     # CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
+        return subprocess.Popen(cmd, stdout=logf, stderr=logf, stdin=subprocess.DEVNULL, creationflags=flags)
+    return subprocess.Popen(cmd, stdout=logf, stderr=logf, stdin=subprocess.DEVNULL, start_new_session=True)
+
+
+def stop_recorder(pid, d, wait=10):
+    """ask the recorder to stop and wait for it: SIGINT on macOS; on Windows a stop file it watches"""
+    if IS_WIN:
+        (Path(d) / "stop.request").write_text("stop")
+    else:
+        os.kill(pid, signal.SIGINT)
+    for _ in range(int(wait * 10)):
+        if not pid_alive(pid):
+            return True
+        time.sleep(0.1)
+    if IS_WIN:
+        subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True)
+    else:
+        os.kill(pid, signal.SIGKILL)
+    return False
+
+
+def open_url(url):
+    import webbrowser
+    if IS_MAC:
+        open_url(url)
+    else:
+        webbrowser.open(url)
+
+
+def play_audio(path):
+    if IS_MAC:
+        subprocess.run(["afplay", str(path)])
+    elif IS_WIN:
+        import winsound
+        winsound.PlaySound(str(path), winsound.SND_FILENAME)
+    else:
+        subprocess.run(["ffplay", "-nodisp", "-autoexit", "-loglevel", "error", str(path)])
 
 
 # ---------------------------------------------------------------- recording
@@ -175,10 +256,11 @@ def cmd_start(a):
     if C.get("auto_gain", True):
         cmd.append("--auto-gain")
     logf = open(d / "capture.log", "ab")
-    p = subprocess.Popen(cmd, stdout=logf, stderr=logf, stdin=subprocess.DEVNULL, start_new_session=True)
-    # keep the Mac awake while recording
-    subprocess.Popen(["caffeinate", "-i", "-w", str(p.pid)], start_new_session=True,
-                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    p = spawn_detached(cmd, logf)
+    if IS_MAC:
+        # keep the Mac awake while recording (the Windows recorder does it by itself)
+        subprocess.Popen(["caffeinate", "-i", "-w", str(p.pid)], start_new_session=True,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     meta = {"started_at": start.isoformat(timespec="seconds"), "title": a.title, "pid": p.pid,
             "language": a.lang or C["language"], "record_system": record_system,
             "transcript_mode": a.transcript or C["transcript_mode"],
@@ -206,13 +288,7 @@ def stop_capture():
         return None
     d = Path(cur["dir"])
     if pid_alive(cur["pid"]):
-        os.kill(cur["pid"], signal.SIGINT)
-        for _ in range(100):
-            if not pid_alive(cur["pid"]):
-                break
-            time.sleep(0.1)
-        else:
-            os.kill(cur["pid"], signal.SIGKILL)
+        stop_recorder(cur["pid"], d)
     meta = read_json(d / "meta.json", {})
     meta["stopped_at"] = now().isoformat(timespec="seconds")
     write_json(d / "meta.json", meta)
@@ -306,7 +382,7 @@ def ff(*args):
 def probe_duration(p):
     if not Path(p).exists():
         return 0.0
-    r = subprocess.run([C["ffmpeg"], "-hide_banner", "-i", str(p)], capture_output=True, text=True)
+    r = subprocess.run([C["ffmpeg"], "-hide_banner", "-i", str(p)], capture_output=True, text=True, encoding="utf-8", errors="replace")
     m = re.search(r"Duration: (\d+):(\d+):([\d.]+)", r.stderr)
     return int(m[1]) * 3600 + int(m[2]) * 60 + float(m[3]) if m else 0.0
 
@@ -424,7 +500,7 @@ def transcribe_whisper(d, tracks, lang):
                "-ml", "30", "-sow"]
         if Path(C["vad_model"]).exists():
             cmd += ["--vad", "-vm", C["vad_model"]]
-        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
         last = -1
         tail = []
         for line in p.stdout:
@@ -470,7 +546,7 @@ def transcribe_vibe(d, tracks, lang):
             t = time.time()
             r = subprocess.run(["curl", "-sS", "--fail-with-body", "-m", "7200", base + "/v1/audio/transcriptions",
                                 "-F", f"file=@{d / f'{n}.wav'}", "-F", f"language={lang}",
-                                "-F", "response_format=verbose_json"], capture_output=True, text=True)
+                                "-F", "response_format=verbose_json"], capture_output=True, text=True, encoding="utf-8", errors="replace")
             if r.returncode:
                 raise RuntimeError(f"vibe transcription failed: {r.stdout[:500]} {r.stderr[:500]}")
             data = json.loads(r.stdout)
@@ -487,7 +563,7 @@ def loudness_per_second(wav):
     r = subprocess.run([C["ffmpeg"], "-hide_banner", "-nostats", "-i", str(wav), "-af",
                         "asetnsamples=16000,astats=metadata=1:reset=1,"
                         "ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-", "-f", "null", "-"],
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, encoding="utf-8", errors="replace")
     levels = []
     for m in re.finditer(r"RMS_level=(-?[\d.]+|-inf)", r.stdout):
         levels.append(-120.0 if m[1] == "-inf" else float(m[1]))
@@ -913,7 +989,7 @@ def macos_events(acc, start, end):
     if not Path(h).exists():
         say("calendar macOS: meetrec-events helper not found - skipped")
         return []
-    r = subprocess.run([h, "--from", start.isoformat(), "--to", end.isoformat()], capture_output=True, text=True, timeout=60)
+    r = subprocess.run([h, "--from", start.isoformat(), "--to", end.isoformat()], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
     if r.returncode:
         say(f"calendar macOS: {r.stderr.strip()[:200]} - skipped")
         return []
@@ -1128,7 +1204,7 @@ def cmd_account(a):
             return google_login()
         if a.provider == "macos":
             h = events_helper()
-            r = subprocess.run([h, "--request-access"], capture_output=True, text=True) if Path(h).exists() else None
+            r = subprocess.run([h, "--request-access"], capture_output=True, text=True, encoding="utf-8", errors="replace") if Path(h).exists() else None
             if not r or r.returncode:
                 say("macOS Calendar: access not granted (System Settings > Privacy > Calendars)")
                 return 1
@@ -1374,7 +1450,7 @@ TRANSCRIPT:
 """
     say("summarizing with " + " ".join(C["summary_cmd"]))
     try:
-        r = subprocess.run(C["summary_cmd"], input=prompt, capture_output=True, text=True, timeout=600, cwd="/tmp")
+        r = subprocess.run(C["summary_cmd"], input=prompt, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600, cwd="/tmp")
     except Exception as e:
         say(f"summary failed: {e}")
         return None, None
@@ -1719,7 +1795,7 @@ def cmd_voice_test(a):
     say(f"speak now: recording {a.seconds} seconds…")
     p = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     time.sleep(a.seconds)
-    p.send_signal(signal.SIGINT)
+    stop_recorder(p.pid, t / "r")
     p.wait(timeout=10)
     raw = sorted((t / "r").glob("mic*.json"))
     if not raw:
@@ -1731,19 +1807,19 @@ def cmd_voice_test(a):
     ff("-i", str(t / "raw.wav"), "-af", VOICE_PROFILES[a.profile][1], str(t / "alt.wav"))
     if m["sample_rate"] <= 24000:
         say(f"note: the microphone records at {m['sample_rate'] // 1000} kHz (Bluetooth headset in call mode): "
-            "low quality; for a better result use the Mac microphone")
+            "low quality; for a better result use the computer's microphone")
     time.sleep(2)            # give Bluetooth headphones time to leave call mode before playing
     say("original…")
-    subprocess.run(["afplay", str(t / "orig.wav")])
+    play_audio(t / "orig.wav")
     say(f"{VOICE_PROFILES[a.profile][0]}…")
-    subprocess.run(["afplay", str(t / "alt.wav")])
+    play_audio(t / "alt.wav")
     shutil.rmtree(t)
     return 0
 
 
 def file_start_time(src, duration):
     """When the audio was recorded: creation_time tag if present, else file mtime minus duration."""
-    r = subprocess.run([C["ffmpeg"], "-hide_banner", "-i", str(src)], capture_output=True, text=True)
+    r = subprocess.run([C["ffmpeg"], "-hide_banner", "-i", str(src)], capture_output=True, text=True, encoding="utf-8", errors="replace")
     m = re.search(r"creation_time\s*:\s*(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)", r.stderr)
     if m:
         t = dt.datetime.fromisoformat(m[1]).replace(tzinfo=dt.timezone.utc).astimezone()
@@ -2022,7 +2098,7 @@ TRASCRIZIONE:
 """
     say("instructions: asking Claude which parts to remove")
     try:
-        r = subprocess.run(C["summary_cmd"], input=prompt, capture_output=True, text=True, timeout=600, cwd="/tmp")
+        r = subprocess.run(C["summary_cmd"], input=prompt, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600, cwd="/tmp")
         m = re.search(r"\{.*\}", r.stdout, re.S)
         ans = json.loads(m.group(0)) if m else {}
         drop = sorted({int(x) for x in ans.get("remove", []) if 1 <= int(x) <= len(turns)})

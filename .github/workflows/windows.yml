@@ -1,0 +1,58 @@
+name: windows
+
+# Windows port: meet.py end to end on a real Windows machine (whisper.cpp for Windows, ffmpeg,
+# UTF-8 notes, recorder start/stop protocol). Later also the Windows recorder and app.
+
+on:
+  push:
+    branches: ['**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  core:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Tools - ffmpeg, whisper.cpp (Windows build), models
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          choco install ffmpeg -y --no-progress | Out-Null
+          $h = @{ Authorization = "Bearer $env:GH_TOKEN" }
+          $rel = Invoke-RestMethod -Headers $h "https://api.github.com/repos/ggml-org/whisper.cpp/releases?per_page=20" |
+                 Where-Object { $_.assets.name -contains 'whisper-bin-x64.zip' } | Select-Object -First 1
+          Write-Host "whisper.cpp release: $($rel.tag_name)"
+          $url = ($rel.assets | Where-Object name -eq 'whisper-bin-x64.zip').browser_download_url
+          Invoke-WebRequest $url -OutFile whisper.zip
+          Expand-Archive whisper.zip -DestinationPath whisper
+          $cli = Get-ChildItem whisper -Recurse -Filter whisper-cli.exe | Select-Object -First 1
+          "WHISPER=$($cli.FullName)" >> $env:GITHUB_ENV
+          New-Item -ItemType Directory models | Out-Null
+          Invoke-WebRequest https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin -OutFile models/ggml-tiny.bin
+          Invoke-WebRequest https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin -OutFile models/ggml-silero-v6.2.0.bin
+
+      - name: Test audio from Windows speech synthesis
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Speech
+          $s = New-Object System.Speech.Synthesis.SpeechSynthesizer
+          $s.SetOutputToWaveFile("$PWD\call.wav")
+          $s.Speak("Let's start with the release. We are ready for Thursday. The budget stays the same.")
+          $s.Dispose()
+
+      - name: meet.py end to end
+        shell: pwsh
+        run: |
+          ffmpeg -version | Select-Object -First 1
+          & $env:WHISPER --help 2>&1 | Select-Object -First 1
+          python scripts/test_core.py call.wav --whisper "$env:WHISPER" --model models/ggml-tiny.bin --vad models/ggml-silero-v6.2.0.bin --word release
