@@ -522,9 +522,9 @@ def track_levels(d, n):
     return None
 
 
-def merge(segs_by_track, levels, join=True):
+def merge(segs_by_track, levels, join=True, lang="it"):
     """sentences of every track in time order; join=True groups consecutive ones of the same speaker"""
-    me, others = C["me"], C["others_label"]
+    me, others = C["me"], others_label(lang)
     j = join_turns if join else (lambda x: x)
     if "mix" in segs_by_track:          # single mixed track: no speaker labels
         return j(sorted(clean_segments(segs_by_track["mix"], "", levels.get("mix")), key=lambda s: s["start"]))
@@ -1213,6 +1213,68 @@ def cmd_events(a):
     return 0
 
 
+# ---------------------------------------------------------------- note language
+# The note is written in the language of the meeting (setting "language": it | en).
+
+NOTE_TEXT = {
+    "it": {
+        "default_summary": 'Registrazione e trascrizione automatica del meeting "{title}".',
+        "open_in_calendar": "apri nel calendario", "manual_block": "Dati del meeting (inseriti a mano)",
+        "calendar_block": "Dal calendario", "organizer": "Organizzatore", "attendees_manual": "Partecipanti",
+        "attendees": "Invitati", "agenda_manual": "Agenda / note", "agenda": "Agenda dall'invito",
+        "no_event": "_Nessun evento di calendario trovato per questo orario._",
+        "altered": " Voce alterata ({profile}, {scope}).", "scope_mine": "solo la mia", "scope_all": "tutte le voci",
+        "recording": "Registrazione: `{path}` ({dur} min, dalle {start} alle {end}).{altered}",
+        "imported": "Importata dal file `{path}`.",
+        "cut": "Audio tagliato prima della trascrizione: {a}–{b} (i tempi della trascrizione si riferiscono all'audio tagliato).",
+        "instructions": "Istruzioni date a Claude: _{text}_",
+        "removed": "Rimosso su richiesta: {a}–{b} ({n} frasi{audio}). {why}", "removed_audio": ", tolte anche dall'audio",
+        "not_applied": "Istruzioni non applicate: {why}",
+        "summary_h": "## Riassunto", "summary_note": "_Generato automaticamente dalla trascrizione: da verificare._",
+        "transcript_h": "## Trascrizione",
+        "transcript_note": "_Trascrizione automatica locale (whisper large-v3-turbo); {who}._",
+        "single": "traccia unica, interlocutori non separati",
+        "tracks": "**{me}** = mio microfono, **{others}** = audio degli altri partecipanti",
+        "no_speech": "_(nessun parlato riconosciuto)_",
+        "audio_deleted": "Audio eliminato dopo la trascrizione il {date} ({dur} min).",
+    },
+    "en": {
+        "default_summary": 'Automatic recording and transcript of the meeting "{title}".',
+        "open_in_calendar": "open in calendar", "manual_block": "Meeting details (entered by hand)",
+        "calendar_block": "From the calendar", "organizer": "Organizer", "attendees_manual": "Attendees",
+        "attendees": "Invited", "agenda_manual": "Agenda / notes", "agenda": "Agenda from the invite",
+        "no_event": "_No calendar event found at this time._",
+        "altered": " Voice altered ({profile}, {scope}).", "scope_mine": "only mine", "scope_all": "all voices",
+        "recording": "Recording: `{path}` ({dur} min, from {start} to {end}).{altered}",
+        "imported": "Imported from the file `{path}`.",
+        "cut": "Audio cut before the transcript: {a}–{b} (transcript times refer to the cut audio).",
+        "instructions": "Instructions given to Claude: _{text}_",
+        "removed": "Removed on request: {a}–{b} ({n} sentences{audio}). {why}", "removed_audio": ", also from the audio",
+        "not_applied": "Instructions not applied: {why}",
+        "summary_h": "## Summary", "summary_note": "_Generated automatically from the transcript: to be checked._",
+        "transcript_h": "## Transcript",
+        "transcript_note": "_Local automatic transcript (whisper large-v3-turbo); {who}._",
+        "single": "single track, speakers not separated",
+        "tracks": "**{me}** = my microphone, **{others}** = the other participants' audio",
+        "no_speech": "_(no speech recognised)_",
+        "audio_deleted": "Audio deleted after the transcript on {date} ({dur} min).",
+    },
+}
+
+
+def note_lang(meta):
+    return "en" if (meta.get("language") or C["language"]) == "en" else "it"
+
+
+def NT(lang, key, **kw):
+    return NOTE_TEXT[lang][key].format(**kw)
+
+
+def others_label(lang):
+    o = C["others_label"]
+    return "Others" if lang == "en" and o == "Altri" else o
+
+
 # ---------------------------------------------------------------- obsidian note
 
 def slug_person(name):
@@ -1253,7 +1315,7 @@ def invite_agenda(event):
     return re.sub(r"\s+", " ", t).strip()
 
 
-def summarize(title, event, transcript_text, instructions=None):
+def summarize(title, event, transcript_text, instructions=None, lang="it"):
     if not C["summary"] or not shutil.which(C["summary_cmd"][0]):
         return None, None
     agenda = invite_agenda(event)[:1500]
@@ -1279,6 +1341,29 @@ RIASSUNTO: <una frase sola, max 25 parole, cosa si è discusso>
 TRASCRIZIONE:
 {transcript_text}
 """
+    if lang == "en":
+        prompt = f"""You are {C['me']}'s assistant. Below is the automatic transcript of a meeting.
+Calendar title: {title}
+Agenda from the invite: {agenda or '(none)'}
+
+"{C['me']}" is {C['me']}'s microphone; "{others_label('en')}" are all the other participants (system audio, not told apart).
+The transcript has recognition errors: fix obvious technical names, do not invent.
+{("INSTRUCTIONS FROM " + C['me'].upper() + " (follow them; the parts to remove are already removed): " + instructions) if instructions else ""}
+
+Answer in English, with exactly this format and nothing else:
+SUMMARY: <one sentence, max 25 words, what was discussed>
+### Key points
+<5-10 bullet points>
+### Decisions
+<bullet points, or "No explicit decision.">
+### Action items
+<bullet points "who → what (deadline if said)", or "None.">
+### Open questions
+<bullet points, or "None.">
+
+TRANSCRIPT:
+{transcript_text}
+"""
     say("summarizing with " + " ".join(C["summary_cmd"]))
     try:
         r = subprocess.run(C["summary_cmd"], input=prompt, capture_output=True, text=True, timeout=600, cwd="/tmp")
@@ -1289,7 +1374,7 @@ TRASCRIZIONE:
         say(f"summary failed: {r.stderr[:300]}")
         return None, None
     text = r.stdout.strip()
-    m = re.match(r"RIASSUNTO:\s*(.+)", text)
+    m = re.match(r"(?:RIASSUNTO|SUMMARY):\s*(.+)", text)
     one = m[1].strip() if m else None
     body = text[m.end():].strip() if m else text
     return one, body
@@ -1324,7 +1409,8 @@ def write_note(d, meta, event, turns, single_track, summary_line, summary_body):
 
     people = people_links(event) if event else []
     dur = int((rec_end - rec_start).total_seconds() // 60)
-    summary_line = summary_line or f"Registrazione e trascrizione automatica del meeting \"{title}\"."
+    L = note_lang(meta)
+    summary_line = summary_line or NT(L, "default_summary", title=title)
     fm = ["---", "type: meeting", f"context: {C['context']}", "status: done",
           f"summary: {yq(summary_line)}", f"date: {when:%Y-%m-%d}", f"created: {dt.date.today()}"]
     fm.append("people:" + ("" if people else " []"))
@@ -1349,46 +1435,45 @@ def write_note(d, meta, event, turns, single_track, summary_line, summary_body):
         manual = bool(event.get("manual"))
         head = f"> **{event.get('subject', '')}**, {event['_start']:%d/%m/%Y %H:%M}-{event['_end']:%H:%M}"
         if event.get("link"):
-            head += f" ([apri nel calendario]({event['link']}))"
+            head += f" ([{NT(L, 'open_in_calendar')}]({event['link']}))"
         if not manual and event.get("source"):
             head += f" · {event['source']}"
-        body += ["> [!info] " + ("Dati del meeting (inseriti a mano)" if manual else "Dal calendario"), head]
+        body += ["> [!info] " + NT(L, "manual_block" if manual else "calendar_block"), head]
         if org:
-            body.append(f"> Organizzatore: {org}")
+            body.append(f"> {NT(L, 'organizer')}: {org}")
         if att:
-            body.append(f"> {'Partecipanti' if manual else 'Invitati'}: {att}")
+            body.append(f"> {NT(L, 'attendees_manual' if manual else 'attendees')}: {att}")
         agenda = invite_agenda(event)
         if agenda:
-            body += ["> ", ("> **Agenda / note:** " if manual else "> **Agenda dall'invito:** ")
+            body += ["> ", f"> **{NT(L, 'agenda_manual' if manual else 'agenda')}:** "
                      + re.sub(r"\s*\n\s*", " ", agenda)[:1200]]
         body.append("")
     else:
-        body += ["_Nessun evento di calendario trovato per questo orario._", ""]
+        body += [NT(L, "no_event"), ""]
     altered = ""
     if meta.get("voice_profile_applied"):
-        altered = (" Voce alterata (" + VOICE_PROFILES[meta["voice_profile_applied"]][0]
-                   + (", solo la mia" if meta.get("voice_profile_scope") == "mine" and meta.get("record_system", True) else ", tutte le voci") + ").")
-    body += [f"Registrazione: `{d / 'mix.m4a'}` ({dur} min, dalle {rec_start:%H:%M} alle {rec_end:%H:%M}).{altered}", ""]
+        mine = meta.get("voice_profile_scope") == "mine" and meta.get("record_system", True)
+        altered = NT(L, "altered", profile=VOICE_PROFILES[meta["voice_profile_applied"]][0],
+                     scope=NT(L, "scope_mine" if mine else "scope_all"))
+    body += [NT(L, "recording", path=d / "mix.m4a", dur=dur, start=f"{rec_start:%H:%M}", end=f"{rec_end:%H:%M}", altered=altered), ""]
     if meta.get("source_file"):
-        body += [f"Importata dal file `{meta['source_file']}`.", ""]
+        body += [NT(L, "imported", path=meta["source_file"]), ""]
     for c in meta.get("cuts", []):
-        body += [f"Audio tagliato prima della trascrizione: {c['from']}–{c['to']}"
-                 + " (i tempi della trascrizione si riferiscono all'audio tagliato).", ""]
+        body += [NT(L, "cut", a=c["from"], b=c["to"]), ""]
     if meta.get("instructions"):
-        body += [f"Istruzioni date a Claude: _{meta['instructions']}_", ""]
+        body += [NT(L, "instructions", text=meta["instructions"]), ""]
     for r in meta.get("removed", []):
-        body += [f"Rimosso su richiesta: {r['from']}–{r['to']} ({r['lines']} frasi"
-                 + (", tolte anche dall'audio" if meta.get("instructions_audio_cut") else "") + f"). {r.get('why', '')}".rstrip(), ""]
+        body += [NT(L, "removed", a=r["from"], b=r["to"], n=r["lines"], why=r.get("why", ""),
+                    audio=NT(L, "removed_audio") if meta.get("instructions_audio_cut") else "").rstrip(), ""]
     if meta.get("instructions_not_applied"):
-        body += [f"Istruzioni non applicate: {meta['instructions_not_applied']}", ""]
+        body += [NT(L, "not_applied", why=meta["instructions_not_applied"]), ""]
     if summary_body:
-        body += ["## Riassunto", "", "_Generato automaticamente dalla trascrizione: da verificare._", "",
+        body += [NT(L, "summary_h"), "", NT(L, "summary_note"), "",
                  summary_body, ""]
-    who = ("traccia unica, interlocutori non separati" if single_track else
-           f"**{C['me']}** = mio microfono, **{C['others_label']}** = audio degli altri partecipanti")
-    body += ["## Trascrizione", "",
-             f"_Trascrizione automatica locale (whisper large-v3-turbo); {who}._", "",
-             transcript_md(turns, single_track) or "_(nessun parlato riconosciuto)_"]
+    who = NT(L, "single") if single_track else NT(L, "tracks", me=C["me"], others=others_label(L))
+    body += [NT(L, "transcript_h"), "",
+             NT(L, "transcript_note", who=who), "",
+             transcript_md(turns, single_track) or NT(L, "no_speech")]
     note.write_text("\n".join(fm) + "\n" + "\n".join(body) + "\n")
     return note
 
@@ -1425,11 +1510,11 @@ def process(d, instructions=None):
     if meta.get("instructions"):
         # Claude works on single sentences (not on grouped turns), so it can point at just the
         # part to remove; then the sentences are grouped as usual
-        sentences = apply_instructions(d, meta, merge(segs, levels, join=False))
+        sentences = apply_instructions(d, meta, merge(segs, levels, join=False, lang=note_lang(meta)))
         meta = read_json(d / "meta.json", meta)
         turns = join_turns(sentences)
     else:
-        turns = merge(segs, levels)
+        turns = merge(segs, levels, lang=note_lang(meta))
     (d / "transcript.md").write_text(transcript_md(turns, single))
 
     event = load_event(d)
@@ -1438,7 +1523,7 @@ def process(d, instructions=None):
         write_json(d / "event.json", plain_event(event))
     title = meta.get("title") or (event or {}).get("subject") or "meeting"
     plain = "\n".join(f"[{hms(t['start'])}] {t['speaker']}: {t['text']}" for t in turns)
-    one, body = summarize(title, event, plain, meta.get("instructions")) if turns else (None, None)
+    one, body = summarize(title, event, plain, meta.get("instructions"), note_lang(meta)) if turns else (None, None)
     apply_voice_profile(d, meta)          # transcription was made on the original audio
     meta = read_json(d / "meta.json", meta)
     note = write_note(d, meta, event, turns, single, one, body)
@@ -1478,7 +1563,7 @@ def verify_processed(d):
     if not note.is_file():
         return False, f"note not found: {note}"
     text = note.read_text()
-    if "## Trascrizione" not in text:
+    if "## Trascrizione" not in text and "## Transcript" not in text:
         return False, "the note has no transcript section"
     if int(meta.get("turns") or 0) <= 0 or not re.search(r"^`\d\d:\d\d:\d\d`", text, re.M):
         return False, "the transcript is empty"
@@ -1506,8 +1591,9 @@ def drop_audio(d):
     today = dt.date.today()
     text = note.read_text()
     text = re.sub(r'^recording: .*$', f'recording: ""\naudio_deleted: {today}', text, count=1, flags=re.M)
-    text = re.sub(r"^Registrazione: `.*$",
-                  f"Audio eliminato dopo la trascrizione il {today:%d/%m/%Y} ({secs / 60:.0f} min).", text, count=1, flags=re.M)
+    L = note_lang(meta)
+    text = re.sub(r"^(Registrazione|Recording): `.*$",
+                  NT(L, "audio_deleted", date=f"{today:%d/%m/%Y}", dur=f"{secs / 60:.0f}"), text, count=1, flags=re.M)
     note.write_text(text)
     meta["audio_deleted_at"] = now().isoformat(timespec="seconds")
     write_json(d / "meta.json", meta)

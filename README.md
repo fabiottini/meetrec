@@ -117,14 +117,15 @@ checked, MeetRec asks whether to keep the audio.
 <p align="center"><img src="docs/tour-keep-audio.png" width="330" alt="Transcript done: keep or delete the audio"></p>
 
 **6. The note in Obsidian.** Frontmatter for your vault, the calendar data, a summary (optional) and
-the transcript with times and speakers. Note texts are in Italian:
+the transcript with times and speakers. The note is written in the language of the meeting
+(Settings > Meeting language: English or Italian):
 
 ```markdown
 ---
 type: meeting
 context: work
 status: done
-summary: "Allineamento settimanale: rilascio 2.4 confermato per giovedì, beta del nuovo onboarding da rimandare."
+summary: "Weekly sync: release 2.4 confirmed for Thursday, the new onboarding beta moves one week."
 date: 2026-11-09
 people:
   - "[[People/jane_doe|jane_doe]]"
@@ -137,23 +138,23 @@ calendar_source: "you@company.com"
 ---
 # Weekly product sync
 
-> [!info] Dal calendario
+> [!info] From the calendar
 > **Weekly product sync**, 09/11/2026 10:00-10:45 · you@company.com
-> Invitati: Jane Doe, Mark Rossi
+> Invited: Jane Doe, Mark Rossi
 
-## Riassunto
+## Summary
 
-### Sintesi
-- Rilascio 2.4 confermato per giovedì, dopo i test di regressione.
-- La beta del nuovo onboarding slitta di una settimana.
+### Key points
+- Release 2.4 confirmed for Thursday, after the regression tests.
+- The new onboarding beta moves one week.
 
-### Action item
-- Jane → note di rilascio entro mercoledì.
+### Action items
+- Jane → release notes by Wednesday.
 
-## Trascrizione
+## Transcript
 
-`00:00:04` **Me:** Partiamo dal rilascio: siamo pronti per giovedì?
-`00:00:09` **Altri:** Sì, mancano solo i test di regressione, li chiudiamo domani.
+`00:00:04` **Me:** Let's start with the release: are we ready for Thursday?
+`00:00:09` **Others:** Yes, only the regression tests are left, we close them tomorrow.
 ```
 
 **7. Settings and setup.** Defaults for recording, transcript, voice profile and audio; the Setup
@@ -444,7 +445,7 @@ microphone: 16 kHz, narrow band, often very quiet. Whisper makes many more mista
 6. **Note**. `<vault>/<meetings_dir>/YYYY-MM/YYYY-MM-DD - <title>.md` with frontmatter
    (`type: meeting`, `context`, `summary`, `people`, `date`, times, links to the recording and
    to the event). Attendees with a `firstname_lastname.md` note in `people_dir` are linked.
-   The note text is in Italian.
+   The note is written in the meeting language (English or Italian), the summary too.
 
 ## Configuration
 
