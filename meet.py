@@ -215,7 +215,7 @@ def stop_recorder(pid, d, wait=10):
 def open_url(url):
     import webbrowser
     if IS_MAC:
-        open_url(url)
+        subprocess.run(["open", url])
     else:
         webbrowser.open(url)
 
@@ -929,7 +929,7 @@ def google_login():
         "scope": GOOGLE_SCOPES, "access_type": "offline", "prompt": "consent select_account",
         "code_challenge": challenge, "code_challenge_method": "S256", "state": state})
     print(f"Open in your browser to sign in to Google: {url}", flush=True)
-    subprocess.run(["open", url])
+    open_url(url)
     srv.timeout = 300
     deadline = time.time() + 300
     while "code" not in result and "error" not in result and time.time() < deadline:

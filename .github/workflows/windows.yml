@@ -93,3 +93,39 @@ jobs:
         run: |
           choco install ffmpeg -y --no-progress | Out-Null
           python scripts/test_recorder.py out/meetrec-capture.exe
+
+  app:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build the tray app and the recorder
+        shell: pwsh
+        run: |
+          dotnet publish windows/app/MeetRec.csproj -c Release -o pub/app
+          dotnet publish windows/capture/MeetRecCapture.csproj -c Release -o pub/capture
+
+      - name: Package MeetRec-windows.zip
+        shell: pwsh
+        run: python windows/package.py pub/app pub/capture dist-win
+
+      - name: Self test from the unzipped package, images of the UI
+        shell: pwsh
+        run: python windows/test_app.py dist-win/MeetRec-windows.zip ui
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: MeetRec-windows
+          path: |
+            dist-win/MeetRec-windows.zip
+            ui/*.png

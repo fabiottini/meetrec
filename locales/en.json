@@ -262,5 +262,6 @@
   "voice_test_info": "Records 5 seconds from the mic, then plays original and profile.",
   "voice_test_speak": "Speak now: recording 5 seconds, then you hear original and profile.",
   "what_to_record": "What to record",
+  "win_start_failed_hint": "If the microphone is blocked, allow desktop apps to use it in Settings > Privacy & security > Microphone, then try again.",
   "you": "You"
 }

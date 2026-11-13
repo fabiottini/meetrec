@@ -262,5 +262,6 @@
   "voice_test_info": "Registra 5 secondi dal microfono, poi fa sentire originale e profilo.",
   "voice_test_speak": "Parla ora: registro 5 secondi, poi senti originale e profilo.",
   "what_to_record": "Cosa registrare",
+  "win_start_failed_hint": "Se il microfono è bloccato, consenti alle app desktop di usarlo in Impostazioni > Privacy e sicurezza > Microfono, poi riprova.",
   "you": "Tu"
 }

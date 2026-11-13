@@ -1,11 +1,11 @@
-"""Every T("key") used by the app exists in every locale file, and all locale files have the same keys."""
+"""Every T("key") used by the apps (macOS and Windows) exists in every locale file, and all locale files have the same keys."""
 import json
 import re
 import sys
 from pathlib import Path
 
 used = set()
-for f in Path("menubar").glob("*.swift"):
+for f in [*Path("menubar").glob("*.swift"), *Path("windows/app").glob("*.cs")]:
     text = f.read_text()
     used |= set(re.findall(r'T\("([a-z_0-9]+)"', text))
     used |= set(re.findall(r'"(g\d_(?:title|text))"', text))       # Google guide steps
