@@ -7,3 +7,9 @@ capture/meetrec-capture
 .DS_Store
 dist/MeetRec.app/
 helpers/meetrec-events
+
+# Windows builds
+windows/*/bin/
+windows/*/obj/
+pub/
+dist-win/

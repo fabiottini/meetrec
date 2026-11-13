@@ -2,6 +2,7 @@
 gap filling, levels file and stop.request protocol used with real devices; then meet.py builds the mix.
 
     python scripts/test_recorder.py path/to/meetrec-capture.exe
+    python scripts/test_recorder.py path/to/MeetRec.exe --capture      (the recorder inside the app)
 """
 import json
 import os
@@ -12,6 +13,7 @@ import time
 from pathlib import Path
 
 exe = Path(sys.argv[1]).resolve()
+prefix = sys.argv[2:]
 work = Path(tempfile.mkdtemp(prefix="meetrec-rec-"))
 d = work / "rec"
 fails = []
@@ -24,7 +26,7 @@ def check(name, ok, info=""):
 
 
 log = open(work / "capture.log", "wb")
-p = subprocess.Popen([str(exe), str(d), "--test-tone", "60"], stdout=log, stderr=log)
+p = subprocess.Popen([str(exe), *prefix, str(d), "--test-tone", "60"], stdout=log, stderr=log)
 started = False
 for _ in range(100):
     time.sleep(0.1)

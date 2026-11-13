@@ -1,11 +1,13 @@
 name: windows
 
-# Windows port: meet.py end to end on a real Windows machine (whisper.cpp for Windows, ffmpeg,
-# UTF-8 notes, recorder start/stop protocol). Later also the Windows recorder and app.
+# Windows: meet.py end to end (whisper.cpp for Windows, ffmpeg, UTF-8 notes), the recorder with
+# synthetic audio, the tray app self test from the unzipped package. On a tag vX.Y.Z the package
+# is attached to the GitHub release as MeetRec-windows.zip (created by `make tag`).
 
 on:
   push:
     branches: ['**']
+    tags: ['v*']
   workflow_dispatch:
 
 permissions:
@@ -27,7 +29,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          choco install ffmpeg -y --no-progress | Out-Null
+          python windows/ci_ffmpeg.py
           python -c @"
           import json, os, urllib.request, zipfile, pathlib
           h = {'Authorization': 'Bearer ' + os.environ['GH_TOKEN'], 'User-Agent': 'meetrec-ci'}
@@ -88,8 +90,65 @@ jobs:
           & ./out/meetrec-capture.exe --list-mics
           "exit $LASTEXITCODE"
 
+      - name: ffmpeg (same download as the app setup)
+        shell: pwsh
+        run: python windows/ci_ffmpeg.py
+
       - name: Synthetic recording through the real writer and stop protocol
         shell: pwsh
+        run: python scripts/test_recorder.py out/meetrec-capture.exe
+
+  app:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build the tray app (recorder included)
+        shell: pwsh
+        run: dotnet publish windows/app/MeetRec.csproj -c Release -o pub/app
+
+      - name: Package MeetRec-windows.zip
+        shell: pwsh
         run: |
-          choco install ffmpeg -y --no-progress | Out-Null
-          python scripts/test_recorder.py out/meetrec-capture.exe
+          python windows/ci_ffmpeg.py
+          python windows/package.py pub/app dist-win
+
+      - name: Self test from the unzipped package, images of the UI
+        shell: pwsh
+        run: python windows/test_app.py dist-win/MeetRec-windows.zip ui
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: MeetRec-windows
+          path: |
+            dist-win/MeetRec-windows.zip
+            ui/*.png
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [core, recorder, app]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: MeetRec-windows
+      - name: Attach MeetRec-windows.zip to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          # `make tag` pushes the tag and then creates the release: wait for it
+          for i in $(seq 1 60); do gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 && break; sleep 10; done
+          gh release upload "$TAG" dist-win/MeetRec-windows.zip -R "$GITHUB_REPOSITORY" --clobber

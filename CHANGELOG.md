@@ -4,6 +4,17 @@ Versions follow [Semantic Versioning](https://semver.org/): MAJOR.MINOR.PATCH.
 MAJOR for changes that break existing use (config, CLI, notes), MINOR for new features,
 PATCH for fixes. Every release has a git tag `vX.Y.Z` (`make tag`).
 
+## 1.7.0 – 2026-11-13
+
+- **Windows (beta)**: `MeetRec-windows.zip` on every release. Tray app with the same menu and flows
+  as the Mac (start/stop, which meeting, manual event, instructions, keep-audio question, import,
+  recordings, audio editor, live levels, mute, call detection, Ctrl+Alt+Win+R), settings, and a
+  setup that downloads ffmpeg, whisper.cpp and the models. Recorder with WASAPI (microphone +
+  system audio loopback, silences filled so the tracks stay aligned), built into MeetRec.exe.
+  Embedded Python, nothing to install; `meet.cmd` for the command line.
+- `meet.py` runs on Windows too (paths, UTF-8, recorder start/stop), tested in CI on Windows.
+- Fix: Google sign-in opened the browser through a broken helper (since the Windows groundwork).
+
 ## 1.6.0 – 2026-11-13
 
 - Edit afterwards: menu **Recordings** with the processed meetings: open the note, **Edit audio…**
