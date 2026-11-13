@@ -2,18 +2,18 @@
 
 # MeetRec
 
-Records meetings on your Mac (your voice and the other participants' voices) and transcribes them
+Records meetings on your Mac or Windows PC (your voice and the other participants' voices) and transcribes them
 **locally** with [whisper.cpp](https://github.com/ggml-org/whisper.cpp). It links each recording to
 the calendar event (Microsoft, Google, iCloud… as many accounts as you want) and saves a note in
 Obsidian, with an optional summary.
 
 There are two ways to use it, and they share the same state:
-- **MeetRec**, a menu bar app;
+- **MeetRec**, a menu bar app on macOS, a tray app on Windows ([beta](#windows-beta));
 - **`meet`**, a command line tool.
 
 > **Personal project, free and open source, shared as is.** MIT license, no support and no
 > warranty: you use it at your own risk (see [CONTRIBUTING.md](CONTRIBUTING.md#no-warranty-no-liability)).
-> Issues and pull requests are welcome, answers are not guaranteed. macOS only.
+> Issues and pull requests are welcome, answers are not guaranteed. macOS; Windows 10/11 in beta.
 >
 > Home: [github.com/fabiottini/meetrec](https://github.com/fabiottini/meetrec): issues and pull
 > requests there.
@@ -203,7 +203,12 @@ Switching it off, or quitting MeetRec, restores the microphone as it was.
 
 ## Installation
 
-The prebuilt app (Apple Silicon and Intel, macOS 15 or later) is attached to every
+| | Download | |
+|---|---|---|
+| **macOS** 15+ (Apple Silicon and Intel) | [`MeetRec-x.y.z.zip`](https://github.com/fabiottini/meetrec/releases/latest) | steps below |
+| **Windows** 10/11 64-bit (beta) | [`MeetRec-windows.zip`](https://github.com/fabiottini/meetrec/releases/latest/download/MeetRec-windows.zip) | see [Windows (beta)](#windows-beta) |
+
+The prebuilt Mac app (Apple Silicon and Intel, macOS 15 or later) is attached to every
 [release](https://github.com/fabiottini/meetrec/releases/latest); the latest one is also in the repo as
 [`dist/MeetRec.zip`](dist/MeetRec.zip).
 
@@ -232,6 +237,51 @@ under **Setup…**. The other options (folders, microphone, languages, summary�
 
 > If you use a menu bar manager (Ice, Bartender…), the icon may end up in the hidden section.
 > Drag it out.
+
+### Windows (beta)
+
+The Windows version has the same menu, flows and notes as the Mac one; `meet.py` is the same file.
+It is built and tested automatically on Windows (GitHub Actions: the recorder with synthetic audio,
+the app self test, the transcription end to end), but it has not been used much on real PCs yet:
+please [open an issue](https://github.com/fabiottini/meetrec/issues) if something does not work.
+
+1. Download [`MeetRec-windows.zip`](https://github.com/fabiottini/meetrec/releases/latest/download/MeetRec-windows.zip)
+   (about 80 MB: the app, the recorder and an embedded Python, nothing to install).
+2. Unzip it where you like, for example `%LOCALAPPDATA%\Programs\MeetRec`, and start **MeetRec.exe**.
+   The app is not signed, so the first time Windows shows **Windows protected your PC**: click
+   **More info > Run anyway**.
+3. The icon appears in the tray, next to the clock (it may hide under the **^** arrow: drag it out).
+   **Setup** opens and downloads what is missing into `%LOCALAPPDATA%\MeetRec`:
+
+<p align="center"><img src="docs/windows/setup.png" width="520" alt="Windows setup: checks, download buttons and calendar accounts"></p>
+
+| Item | What the button does |
+|---|---|
+| Python 3 | nothing to do: it is inside the zip |
+| ffmpeg | downloads ffmpeg (gyan.dev essentials build, about 100 MB) |
+| whisper.cpp | downloads the latest Windows build from the whisper.cpp releases |
+| Transcription model | downloads whisper large-v3-turbo (1.6 GB) and the silence filter |
+| Microphone permission | opens Settings > Privacy & security > Microphone when desktop apps are blocked |
+| Obsidian vault | choose the folder |
+| Calendars (optional) | Microsoft and Google accounts, same guides as on the Mac |
+| Claude Code (optional) | needed for the summary |
+| `meet` command (optional) | adds the MeetRec folder to your PATH: `meet.cmd` works in any new terminal |
+
+<p align="center">
+<img src="docs/windows/menu.png" width="300" alt="Windows tray menu with levels">
+<img src="docs/windows/which-meeting.png" width="440" alt="Which meeting was it?">
+</p>
+<p align="center"><img src="docs/windows/editor.png" width="640" alt="Audio editor on Windows"></p>
+
+What is different from the Mac:
+
+- System audio is recorded with WASAPI loopback: no permission and no driver needed.
+- Global shortcut: **Ctrl+Alt+Win+R** (Ctrl+Alt+Shift+R if another app has it).
+- Calendars: Microsoft and Google; there is no equivalent of "macOS Calendar".
+- Call detection reads the Windows microphone usage records (the same ones behind the microphone
+  icon in the taskbar).
+- Config in `%APPDATA%\MeetRec\config.json`, tools, models and state in `%LOCALAPPDATA%\MeetRec`.
+- Start at login: **Settings > Open MeetRec at login**.
 
 ### Build, install and release with make
 
@@ -544,6 +594,7 @@ MeetRec does not bundle them; the Setup installs or downloads them:
 - Without headphones the microphone also picks up the speakers. Duplicate sentences are filtered,
   but with headphones the transcript is cleaner.
 - The app is ad-hoc signed, so after each new build macOS may ask for the permissions again.
+- The Windows app is not signed: SmartScreen warns the first time (More info > Run anyway).
 
 ## Contributing
 
@@ -572,4 +623,8 @@ Makefile, build.sh, install.sh
 CONTRIBUTING.md, SECURITY.md  how to contribute, how to report a security problem
 VERSION, CHANGELOG.md       version (semver) and release notes
 scripts/check_locales.py  used by make check
+windows/app/              Windows tray app (C#, WinForms + NAudio); also the recorder (MeetRec.exe --capture)
+windows/capture/          Windows recorder (WASAPI mic + loopback), standalone build for its CI test
+windows/package.py        builds MeetRec-windows.zip with an embedded Python
+.github/workflows/        Windows CI; on a tag it attaches MeetRec-windows.zip to the release
 ```

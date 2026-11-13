@@ -1,11 +1,13 @@
 name: windows
 
-# Windows port: meet.py end to end on a real Windows machine (whisper.cpp for Windows, ffmpeg,
-# UTF-8 notes, recorder start/stop protocol). Later also the Windows recorder and app.
+# Windows: meet.py end to end (whisper.cpp for Windows, ffmpeg, UTF-8 notes), the recorder with
+# synthetic audio, the tray app self test from the unzipped package. On a tag vX.Y.Z the package
+# is attached to the GitHub release as MeetRec-windows.zip (created by `make tag`).
 
 on:
   push:
     branches: ['**']
+    tags: ['v*']
   workflow_dispatch:
 
 permissions:
@@ -131,3 +133,22 @@ jobs:
           path: |
             dist-win/MeetRec-windows.zip
             ui/*.png
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [core, recorder, app]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: MeetRec-windows
+      - name: Attach MeetRec-windows.zip to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          # `make tag` pushes the tag and then creates the release: wait for it
+          for i in $(seq 1 60); do gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 && break; sleep 10; done
+          gh release upload "$TAG" dist-win/MeetRec-windows.zip -R "$GITHUB_REPOSITORY" --clobber
