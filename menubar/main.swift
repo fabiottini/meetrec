@@ -174,12 +174,16 @@ func fitMenuTitle(_ title: String, room: CGFloat) -> String {
     let font = NSFont.menuFont(ofSize: 0)
     func width(_ s: String) -> CGFloat { (s as NSString).size(withAttributes: [.font: font]).width }
     guard width(title) > room else { return title }
+    // measure the result WITH the ellipsis, so a shortened title never needs a second cut
+    func join(_ c: [Character]) -> String {
+        let mid = c.count / 2
+        return String(c[..<mid]).trimmingCharacters(in: .whitespaces) + "…" + String(c[mid...]).trimmingCharacters(in: .whitespaces)
+    }
     var chars = Array(title)
-    while chars.count > 8 && width(String(chars)) > room {
+    while chars.count > 6 && width(join(chars)) > room {
         chars.remove(at: chars.count / 2)                      // keep the start and the end
     }
-    let mid = chars.count / 2
-    return String(chars[..<mid]).trimmingCharacters(in: .whitespaces) + "…" + String(chars[mid...]).trimmingCharacters(in: .whitespaces)
+    return join(chars)
 }
 
 // MARK: - config.json, read again only when the file changes (it is polled by the timers)
@@ -649,8 +653,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         mi.state = MicMute.shared.enabled ? .on : .off
         menu.addItem(mi)
         menu.addItem(.separator())
-        func add(_ title: String, _ action: Selector?, key: String = "", enabled: Bool = true) -> NSMenuItem {
-            let i = NSMenuItem(title: fitMenuTitle(title, room: key.isEmpty ? 286 : 230), action: action, keyEquivalent: key)
+        func add(_ title: String, _ action: Selector?, key: String = "", enabled: Bool = true, fit: Bool = true) -> NSMenuItem {
+            let i = NSMenuItem(title: fit ? fitMenuTitle(title, room: key.isEmpty ? 286 : 230) : title, action: action, keyEquivalent: key)
             if i.title != title { i.toolTip = title }
             i.target = self; i.isEnabled = enabled && action != nil
             menu.addItem(i); return i
@@ -661,7 +665,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             let headW = (head as NSString).size(withAttributes: [.font: NSFont.menuFont(ofSize: 0)]).width
             let dashW = (" – " as NSString).size(withAttributes: [.font: NSFont.menuFont(ofSize: 0)]).width
             let t = c.title.map { " – " + fitMenuTitle($0, room: 286 - headW - dashW - 6) } ?? ""
-            _ = add(c.alive ? head + t : T("the_recorder_stopped_stop_to_save"), nil)
+            _ = add(c.alive ? head + t : T("the_recorder_stopped_stop_to_save"), nil, fit: !c.alive)   // keep the timer
             let sp = add(T("stop_and_process"), #selector(stopAndProcess), key: "r")
             sp.keyEquivalentModifierMask = [.command, .option, .control]
             _ = add(T("stop_without_processing"), #selector(stopOnly))
@@ -683,7 +687,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 let date = String(name.prefix(13))                                   // "2026-11-12 - "
                 short = date + fitMenuTitle(String(name.dropFirst(13)), room: room - (date as NSString).size(withAttributes: [.font: NSFont.menuFont(ofSize: 0)]).width)
             }
-            let ln = add(prefix + short, #selector(openLastNote))
+            let ln = add(prefix + short, #selector(openLastNote), fit: false)       // already shortened, keep the date
             ln.toolTip = name
         }
         _ = add(T("import_audio_file"), processing ? nil : #selector(importAudio), key: "i")
@@ -1255,7 +1259,7 @@ func renderDocs(_ dir: String, _ d: AppDelegate) {
 
     // the menu, built by the app itself (same items, shortcuts and disabled rows as on screen),
     // drawn under the level panel: idle and while recording
-    d.lastNote = "/Users/you/Obsidian/Notes/Work/Meetings/2026-11/2026-11-09 - Weekly product sync.md"
+    d.lastNote = ProcessInfo.processInfo.environment["MEETREC_DOCS_LASTNOTE"] ?? "/Users/you/Obsidian/Notes/Work/Meetings/2026-11/2026-11-09 - Weekly product sync.md"
     d.recover = [["started_at": "2026-11-06T15:02:11+01:00", "duration": "0h23m10s", "title": "Supplier call",
                   "dir": "/Users/you/Recordings/meetings/2026-11-06_150211"]]
     func drawMenu(_ file: String, recording: Bool) {
