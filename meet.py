@@ -71,7 +71,7 @@ def first_existing(*paths):
     for p in paths:
         if p and Path(p).exists():
             return str(p)
-    return str(paths[0]) if paths else ""
+    return str(next((p for p in paths if p), ""))       # nothing found: the first candidate, for the message
 
 
 def find_capture():
