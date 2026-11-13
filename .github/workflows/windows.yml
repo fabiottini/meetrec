@@ -28,18 +28,23 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           choco install ffmpeg -y --no-progress | Out-Null
-          $h = @{ Authorization = "Bearer $env:GH_TOKEN" }
-          $rel = Invoke-RestMethod -Headers $h "https://api.github.com/repos/ggml-org/whisper.cpp/releases?per_page=20" |
-                 Where-Object { $_.assets.name -contains 'whisper-bin-x64.zip' } | Select-Object -First 1
-          Write-Host "whisper.cpp release: $($rel.tag_name)"
-          $url = ($rel.assets | Where-Object name -eq 'whisper-bin-x64.zip').browser_download_url
-          Invoke-WebRequest $url -OutFile whisper.zip
-          Expand-Archive whisper.zip -DestinationPath whisper
-          $cli = Get-ChildItem whisper -Recurse -Filter whisper-cli.exe | Select-Object -First 1
-          "WHISPER=$($cli.FullName)" >> $env:GITHUB_ENV
-          New-Item -ItemType Directory models | Out-Null
-          Invoke-WebRequest https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin -OutFile models/ggml-tiny.bin
-          Invoke-WebRequest https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin -OutFile models/ggml-silero-v6.2.0.bin
+          python -c @"
+          import json, os, urllib.request, zipfile, pathlib
+          h = {'Authorization': 'Bearer ' + os.environ['GH_TOKEN'], 'User-Agent': 'meetrec-ci'}
+          req = urllib.request.Request('https://api.github.com/repos/ggml-org/whisper.cpp/releases?per_page=20', headers=h)
+          rels = json.load(urllib.request.urlopen(req))
+          rel = next(r for r in rels if any(a['name'] == 'whisper-bin-x64.zip' for a in r['assets']))
+          url = next(a['browser_download_url'] for a in rel['assets'] if a['name'] == 'whisper-bin-x64.zip')
+          print('whisper.cpp release', rel['tag_name'])
+          urllib.request.urlretrieve(url, 'whisper.zip')
+          zipfile.ZipFile('whisper.zip').extractall('whisper')
+          cli = next(pathlib.Path('whisper').rglob('whisper-cli.exe'))
+          open(os.environ['GITHUB_ENV'], 'a').write(f'WHISPER={cli.resolve()}\n')
+          os.makedirs('models', exist_ok=True)
+          for u in ['https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin',
+                    'https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin']:
+              urllib.request.urlretrieve(u, 'models/' + u.rsplit('/', 1)[1])
+          "@
 
       - name: Test audio from Windows speech synthesis
         shell: pwsh
