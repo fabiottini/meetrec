@@ -139,6 +139,13 @@ sealed class LevelPanel : UserControl
         timer.Tick += (_, _) => Tick();
     }
 
+    /// height for the menu: without the mic test row while recording
+    public void Prepare(bool recording)
+    {
+        Height = recording ? 152 : 192;
+        test.Visible = note.Visible = !recording;
+    }
+
     public void Open()
     {
         using var d = Mics.Current();
@@ -152,6 +159,7 @@ sealed class LevelPanel : UserControl
         meters.Clear();
         ReadVolume(d);
         UpdateMute();
+        Tick();
         timer.Start();
     }
 

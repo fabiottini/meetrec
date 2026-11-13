@@ -76,6 +76,7 @@ static partial class Extras
         using (var g = Guides.Google(null, _ => { }, show: false)) check("google guide", true, "");
         using (var m = Guides.Microsoft(null, _ => { }, show: false)) check("microsoft guide", true, "");
         using (var p = CallPrompt.Demo()) { p.CreateControl(); check("call prompt", true, ""); }
+        using (var ed = EditorForm.Demo()) { ed.CreateControl(); check("audio editor", true, ""); }
         var users = CallWatcher.MicUsers();
         check("mic users (privacy records)", true, users.Count == 0 ? "nobody" : string.Join(", ", users));
     }
@@ -86,5 +87,6 @@ static partial class Extras
         list.Add(("setup", () => new SetupForm(load: false)));
         list.Add(("guide-microsoft", () => Guides.Microsoft(null, _ => { }, show: false)));
         list.Add(("call-prompt", CallPrompt.Demo));
+        list.Add(("editor", EditorForm.Demo));
     }
 }

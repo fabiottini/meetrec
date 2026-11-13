@@ -166,6 +166,8 @@ sealed class TrayApp : ApplicationContext
         var m = Menu.Items;
         var c = Cur();
         var hk = hotkey.Display;
+        Levels.Prepare(c?.Alive == true);
+        levelHost.Size = Levels.Size;
         m.Add(levelHost);
         var mi = new ToolStripMenuItem(T("mute_mic_menu")) { Checked = MicMute.Enabled };
         mi.Click += (_, _) => ToggleMute();
