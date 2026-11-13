@@ -4,6 +4,19 @@ Versions follow [Semantic Versioning](https://semver.org/): MAJOR.MINOR.PATCH.
 MAJOR for changes that break existing use (config, CLI, notes), MINOR for new features,
 PATCH for fixes. Every release has a git tag `vX.Y.Z` (`make tag`).
 
+## 1.7.1 – 2026-11-13
+
+Security and maintenance.
+
+- The summary and the instructions run Claude Code with no tools, no MCP servers, no skills and no
+  saved session: the transcript is untrusted text, so it can only produce the answer. Also fixed the
+  working folder for Claude on Windows.
+- Downloads verified with SHA-256: the speech models (macOS and Windows setup), ffmpeg and whisper.cpp
+  (Windows setup).
+- Windows: .NET 10 LTS (.NET 8 reached end of support on 2026-11-10), embedded Python 3.14.10,
+  CI check for vulnerable NuGet packages, GitHub Actions pinned to commit SHAs.
+- README: quick start for Windows and macOS, security section.
+
 ## 1.7.0 – 2026-11-13
 
 - **Windows (beta)**: `MeetRec-windows.zip` on every release. Tray app with the same menu and flows

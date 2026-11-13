@@ -240,6 +240,7 @@
   "setup_win_mic_after": "After allowing the microphone, press Check again.",
   "setup_win_mic_blocked": "Blocked: allow desktop apps in Settings > Privacy & security > Microphone",
   "setup_win_python_missing": "Not found: unzip MeetRec again (Python is inside the zip)",
+  "setup_win_verifying": "Checking {file} (SHA-256)",
   "setup_win_whisper_detail": "To download: whisper.cpp for Windows, the transcription engine",
   "silence_speak_to_test_the_level": "Silence: speak to test the level",
   "start_options_title": "New recording",

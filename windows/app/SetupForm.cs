@@ -15,10 +15,13 @@ sealed class SetupForm : Form
 {
     public record CheckItem(string Id, string Title, string Detail, bool Ok, bool Required, string? Action);
 
-    static readonly (string file, string url)[] Models =
+    // SHA-256 from the Hugging Face file listings (LFS oid): a changed or damaged file is refused
+    static readonly (string file, string url, string sha256)[] Models =
     {
-        ("ggml-large-v3-turbo.bin", "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin"),
-        ("ggml-silero-v6.2.0.bin", "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin"),
+        ("ggml-large-v3-turbo.bin", "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin",
+         "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69"),
+        ("ggml-silero-v6.2.0.bin", "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin",
+         "2aa269b785eeb53a82983a20501ddf7c1d9c48e33ab63a41391ac6c9f7fb6987"),
     };
     const string FfmpegUrl = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip";
     static string Bin => Path.Combine(Paths.DataDir, "bin");
@@ -290,7 +293,8 @@ sealed class SetupForm : Form
     static readonly HttpClient http = new(new HttpClientHandler { AllowAutoRedirect = true }) { Timeout = TimeSpan.FromHours(2) };
     static SetupForm() { http.DefaultRequestHeaders.UserAgent.ParseAdd("MeetRec-Setup"); }
 
-    async Task<bool> Download(string url, string dest, string label)
+    /// download to <dest>.part, check the SHA-256 when known, then move into place
+    async Task<bool> Download(string url, string dest, string label, string? sha256 = null)
     {
         AddLog("↓ " + url);
         SetBusy(T("setup_downloading", ("file", label)), 0);
@@ -314,6 +318,22 @@ sealed class SetupForm : Form
                     if (total > 0 && (DateTime.Now - last).TotalMilliseconds > 200) { SetBusy(busy, (double)got / total); last = DateTime.Now; }
                 }
             }
+            if (sha256 != null)
+            {
+                SetBusy(T("setup_win_verifying", ("file", label)));
+                var got = await Task.Run(() =>
+                {
+                    using var f = File.OpenRead(part);
+                    return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(f)).ToLowerInvariant();
+                });
+                if (got != sha256.ToLowerInvariant())
+                {
+                    AddLog($"✖ {label}: SHA-256 {got} ≠ {sha256}");
+                    File.Delete(part);
+                    return false;
+                }
+                AddLog("✔ SHA-256 " + got[..16] + "…");
+            }
             File.Move(part, dest, true);
             AddLog("✔ " + Path.GetFileName(dest));
             return true;
@@ -329,7 +349,10 @@ sealed class SetupForm : Form
     async Task InstallFfmpeg()
     {
         var zip = Path.Combine(Paths.DataDir, "ffmpeg.zip");
-        if (await Download(FfmpegUrl, zip, "ffmpeg"))
+        string? sha = null;
+        try { sha = (await http.GetStringAsync(FfmpegUrl + ".sha256")).Trim().Split(' ')[0]; }     // published by gyan.dev
+        catch (Exception e) { AddLog("✖ ffmpeg .sha256: " + e.Message); }
+        if (sha is { Length: 64 } && await Download(FfmpegUrl, zip, "ffmpeg", sha))
         {
             SetBusy(T("setup_win_extracting", ("file", "ffmpeg.exe")));
             await Task.Run(() =>
@@ -348,19 +371,27 @@ sealed class SetupForm : Form
     async Task InstallWhisper()
     {
         SetBusy(T("setup_downloading", ("file", "whisper.cpp")));
-        string? url = null;
+        string? url = null, sha = null;
         try
         {
             var rels = JsonNode.Parse(await http.GetStringAsync("https://api.github.com/repos/ggml-org/whisper.cpp/releases?per_page=20")) as JsonArray;
             foreach (var r in rels!.OfType<JsonObject>())
             {
                 var a = (r["assets"] as JsonArray)?.OfType<JsonObject>().FirstOrDefault(x => x["name"]?.GetValue<string>() == "whisper-bin-x64.zip");
-                if (a != null) { url = a["browser_download_url"]!.GetValue<string>(); AddLog("whisper.cpp " + r["tag_name"]); break; }
+                if (a != null)
+                {
+                    url = a["browser_download_url"]!.GetValue<string>();
+                    var digest = a["digest"]?.GetValue<string>() ?? "";          // "sha256:…", set by GitHub for release assets
+                    sha = digest.StartsWith("sha256:") ? digest[7..] : null;
+                    AddLog("whisper.cpp " + r["tag_name"]);
+                    break;
+                }
             }
         }
         catch (Exception e) { AddLog("✖ " + e.Message); }
         var zip = Path.Combine(Paths.DataDir, "whisper.zip");
-        if (url != null && await Download(url, zip, "whisper.cpp"))
+        if (url != null && sha == null) AddLog("✖ whisper.cpp: no SHA-256 published for the download");
+        if (url != null && sha != null && await Download(url, zip, "whisper.cpp", sha))
         {
             SetBusy(T("setup_win_extracting", ("file", "whisper-cli.exe")));
             await Task.Run(() =>
@@ -380,10 +411,10 @@ sealed class SetupForm : Form
 
     async Task InstallModels()
     {
-        foreach (var (file, url) in Models)
+        foreach (var (file, url, sha) in Models)
         {
             if (ModelPath(file) != null) continue;
-            if (!await Download(url, Path.Combine(ModelDir, file), file)) break;
+            if (!await Download(url, Path.Combine(ModelDir, file), file, sha)) break;
         }
         SetBusy(null);
         BuildChecks();

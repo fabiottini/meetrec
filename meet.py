@@ -29,6 +29,7 @@ import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -82,6 +83,17 @@ def find_capture():
                           APP_DIR / f"meetrec-capture{EXE}",
                           APP_DIR / "MeetRec.exe",
                           APP_DIR / "capture" / f"meetrec-capture{EXE}")
+
+def claude_cmd():
+    """the summary command. The transcript is untrusted text (anyone in the call speaks into it), so
+    Claude Code runs with no tools, no MCP servers, no skills and no saved session: it can only answer."""
+    cmd = list(C["summary_cmd"])
+    if Path(cmd[0]).name.lower().startswith("claude"):
+        for flag in (["--tools", ""], ["--strict-mcp-config"], ["--disable-slash-commands"], ["--no-session-persistence"]):
+            if flag[0] not in cmd:
+                cmd += flag
+    return cmd
+
 
 def capture_cmd():
     """the recorder command: on Windows the recorder lives inside MeetRec.exe (one .NET runtime, not two)"""
@@ -1455,9 +1467,10 @@ SUMMARY: <one sentence, max 25 words, what was discussed>
 TRANSCRIPT:
 {transcript_text}
 """
-    say("summarizing with " + " ".join(C["summary_cmd"]))
+    say("summarizing with " + " ".join(C["summary_cmd"]) + " (no tools)")
     try:
-        r = subprocess.run(C["summary_cmd"], input=prompt, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600, cwd="/tmp")
+        r = subprocess.run(claude_cmd(), input=prompt, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600,
+                           cwd=tempfile.gettempdir())
     except Exception as e:
         say(f"summary failed: {e}")
         return None, None
@@ -2105,7 +2118,8 @@ TRASCRIZIONE:
 """
     say("instructions: asking Claude which parts to remove")
     try:
-        r = subprocess.run(C["summary_cmd"], input=prompt, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600, cwd="/tmp")
+        r = subprocess.run(claude_cmd(), input=prompt, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600,
+                           cwd=tempfile.gettempdir())
         m = re.search(r"\{.*\}", r.stdout, re.S)
         ans = json.loads(m.group(0)) if m else {}
         drop = sorted({int(x) for x in ans.get("remove", []) if 1 <= int(x) <= len(turns)})

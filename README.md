@@ -18,6 +18,39 @@ There are two ways to use it, and they share the same state:
 > Home: [github.com/fabiottini/meetrec](https://github.com/fabiottini/meetrec): issues and pull
 > requests there.
 
+## Quick start
+
+**Before you start**
+- [Obsidian](https://obsidian.md) (free): create a vault, that is any folder. Meeting notes go there.
+- About **2 GB free** for the speech model.
+- Optional: [Claude Code](https://claude.com/claude-code), for the summary. Without it the note has only the transcript.
+
+**Windows 10/11 (64-bit, beta)**
+1. Download [`MeetRec-windows.zip`](https://github.com/fabiottini/meetrec/releases/latest/download/MeetRec-windows.zip).
+2. Unzip it to a folder (for example `%LOCALAPPDATA%\Programs\MeetRec`) and start **MeetRec.exe**.
+3. If Windows says "Windows protected your PC": **More info > Run anyway** (the app is not signed).
+4. The icon appears next to the clock; if you do not see it, it is under the **^** arrow: drag it out.
+5. **Setup** opens: press **Download** on ffmpeg, whisper.cpp and the model (1.6 GB), then choose the
+   Obsidian vault folder.
+
+**macOS 15 or later**
+1. Install [Homebrew](https://brew.sh) (Setup copies the command for you).
+2. Download `MeetRec-x.y.z.zip` from the [latest release](https://github.com/fabiottini/meetrec/releases/latest),
+   unzip it and move MeetRec to Applications.
+3. The first time macOS blocks it: **System Settings > Privacy & Security > Open Anyway**.
+4. In **Setup** press the buttons: Python, ffmpeg, whisper.cpp, the model, the microphone and system
+   audio permissions (reopen the app after the system audio one), the Obsidian vault.
+
+**Use it**
+- Click the icon > **Start recording**, or the shortcut: **Ctrl+Alt+Win+R** on Windows, **⌃⌥⌘R** on Mac.
+- Click the icon > **Stop and process**. MeetRec asks which meeting it was: pick a calendar event or
+  **"Something else: I'll write it"** (title, attendees). A few minutes later the note is in Obsidian.
+- Always tell the people in the call that you are recording.
+- Calendars (Microsoft, Google) are optional and need a one-time setup with the guide in Setup.
+
+**Something wrong?** [Open an issue](https://github.com/fabiottini/meetrec/issues) with a screenshot,
+the log (menu > **Log**) and your system (Windows 10/11, Mac Intel/Apple Silicon).
+
 ## Why
 
 The [Vibe](https://github.com/thewh1teagle/vibe) app sometimes freezes while it saves a recording,
@@ -573,7 +606,23 @@ To ship it with the app, add it to `locales/` and run `./install.sh`.
   Microsoft and Google; tokens are in `~/.config/meetrec/tokens/` (mode 0600).
 - With **Automatic summary** on, the **text** of the transcript is sent to Claude through your Claude
   Code (`summary_cmd`). Turn it off, or point `summary_cmd` to a local model, to keep everything
-  offline.
+  offline. The transcript is untrusted text (anyone in the call speaks into it), so Claude Code runs
+  with **no tools, no MCP servers, no skills and no saved session** (`--tools "" --strict-mcp-config
+  --disable-slash-commands --no-session-persistence`): it can only write the answer.
+
+## Security
+
+- `meet.py` uses only the Python standard library: no packages to install, nothing from PyPI.
+- Downloads are checked: the speech models against their published SHA-256 (macOS and Windows),
+  ffmpeg against the `.sha256` file of gyan.dev, whisper.cpp against the GitHub release digest.
+- Windows: .NET 10 (LTS), Python 3.14 embedded, NAudio. CI fails when a NuGet package with a known
+  vulnerability is used (`dotnet list package --vulnerable --include-transitive`); GitHub Actions are
+  pinned to commit SHAs.
+- Calendar logins: Microsoft device code; Google with PKCE, a `state` check and a callback server
+  bound to 127.0.0.1 only. Tokens readable only by you.
+- ffmpeg and whisper.cpp read your audio files: keep them updated (`brew upgrade` on Mac; on Windows
+  delete them from `%LOCALAPPDATA%\MeetRec\bin` and press Download again in Setup).
+- Found a problem? See [SECURITY.md](SECURITY.md).
 - **Tell the people in the call that you are recording** and ask for consent where the law requires
   it: rules differ by country (and by US state), and recording without saying so can be illegal.
   MeetRec shows this once before the first recording; you are responsible for how you use it.

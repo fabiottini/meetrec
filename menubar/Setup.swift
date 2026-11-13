@@ -4,15 +4,28 @@
 import AppKit
 import AVFoundation
 import CoreGraphics
+import CryptoKit
 import SwiftUI
 
 let toolPaths = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"]
 let dataDir = URL(fileURLWithPath: "\(home)/Library/Application Support/MeetRec")
 let vibeDir = "\(home)/Library/Application Support/github.com.thewh1teagle.vibe"
-let models: [(file: String, url: String)] = [
-    ("ggml-large-v3-turbo.bin", "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin"),
-    ("ggml-silero-v6.2.0.bin", "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin"),
+// SHA-256 from the Hugging Face file listings (LFS oid): a changed or damaged download is refused
+let models: [(file: String, url: String, sha256: String)] = [
+    ("ggml-large-v3-turbo.bin", "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin",
+     "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69"),
+    ("ggml-silero-v6.2.0.bin", "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin",
+     "2aa269b785eeb53a82983a20501ddf7c1d9c48e33ab63a41391ac6c9f7fb6987"),
 ]
+
+/// SHA-256 of a file, read in 8 MB blocks (the model is 1.6 GB)
+func sha256(of url: URL) -> String? {
+    guard let h = try? FileHandle(forReadingFrom: url) else { return nil }
+    defer { try? h.close() }
+    var hasher = SHA256()
+    while let d = try? h.read(upToCount: 8 << 20), !d.isEmpty { hasher.update(data: d) }
+    return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+}
 
 func findTool(_ name: String) -> String? {
     toolPaths.map { "\($0)/\(name)" }.first { FileManager.default.isExecutableFile(atPath: $0) }
@@ -70,7 +83,7 @@ final class SetupModel: NSObject, ObservableObject, URLSessionDownloadDelegate {
     @Published var loginURL = ""
     private var loginProc: Process?
     private var loginCancelled = false
-    private var downloadQueue: [(file: String, url: String)] = []
+    private var downloadQueue: [(file: String, url: String, sha256: String)] = []
 
     var requiredMissing: Bool { checks.contains { $0.required && !$0.ok } }
 
@@ -315,11 +328,32 @@ final class SetupModel: NSObject, ObservableObject, URLSessionDownloadDelegate {
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
         let m = downloadQueue.removeFirst()
         let dest = dataDir.appendingPathComponent("models/\(m.file)")
-        try? FileManager.default.removeItem(at: dest)
-        do { try FileManager.default.moveItem(at: location, to: dest); log += "✓ \(m.file)\n" }
-        catch { log += "✗ \(m.file): \(error.localizedDescription)\n" }
+        let part = dest.appendingPathExtension("part")
+        try? FileManager.default.removeItem(at: part)
         session.finishTasksAndInvalidate()
-        nextDownload()
+        do { try FileManager.default.moveItem(at: location, to: part) } catch {
+            log += "✗ \(m.file): \(error.localizedDescription)\n"
+            nextDownload()
+            return
+        }
+        busy = T("setup_win_verifying", ["file": m.file])
+        progress = nil
+        DispatchQueue.global(qos: .utility).async {
+            let got = sha256(of: part)
+            DispatchQueue.main.async {
+                if got == m.sha256 {
+                    try? FileManager.default.removeItem(at: dest)
+                    do { try FileManager.default.moveItem(at: part, to: dest); self.log += "✓ \(m.file) (SHA-256 ok)\n" }
+                    catch { self.log += "✗ \(m.file): \(error.localizedDescription)\n" }
+                    self.nextDownload()
+                } else {
+                    try? FileManager.default.removeItem(at: part)
+                    self.log += "✗ \(m.file): SHA-256 \(got ?? "?") ≠ \(m.sha256)\n"
+                    self.downloadQueue = []
+                    self.nextDownload()
+                }
+            }
+        }
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
