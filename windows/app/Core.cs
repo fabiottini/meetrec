@@ -23,7 +23,8 @@ static class Paths
 
     /// meet.py next to the exe (the zip), or MEETREC_SCRIPT (dev runs)
     public static string Script => Environment.GetEnvironmentVariable("MEETREC_SCRIPT") ?? Path.Combine(AppDir, "meet.py");
-    public static string Capture => Path.Combine(AppDir, "meetrec-capture.exe");
+    /// the recorder is MeetRec.exe itself (--capture)
+    public static string Capture => Environment.ProcessPath ?? Path.Combine(AppDir, "MeetRec.exe");
 
     /// the embedded Python in the zip; otherwise the py launcher or python on PATH
     public static string? Python()

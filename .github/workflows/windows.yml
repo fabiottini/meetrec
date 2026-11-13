@@ -108,15 +108,15 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Build the tray app and the recorder
+      - name: Build the tray app (recorder included)
         shell: pwsh
-        run: |
-          dotnet publish windows/app/MeetRec.csproj -c Release -o pub/app
-          dotnet publish windows/capture/MeetRecCapture.csproj -c Release -o pub/capture
+        run: dotnet publish windows/app/MeetRec.csproj -c Release -o pub/app
 
       - name: Package MeetRec-windows.zip
         shell: pwsh
-        run: python windows/package.py pub/app pub/capture dist-win
+        run: |
+          choco install ffmpeg -y --no-progress | Out-Null
+          python windows/package.py pub/app dist-win
 
       - name: Self test from the unzipped package, images of the UI
         shell: pwsh

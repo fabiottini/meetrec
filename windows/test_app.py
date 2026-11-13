@@ -39,5 +39,9 @@ ok = ok and r2.returncode == 0 and len(pngs) >= 5
 cmd = subprocess.run([str(tmp / "MeetRec" / "meet.cmd"), "--version"], capture_output=True, text=True, env=env)
 print("meet.cmd:", cmd.stdout.strip(), cmd.stderr.strip())
 ok = ok and cmd.stdout.startswith("MeetRec")
+# the recorder inside MeetRec.exe, through the same test as the standalone one
+rec = subprocess.run([sys.executable, str(Path(__file__).resolve().parent.parent / "scripts" / "test_recorder.py"),
+                      str(app), "--capture"])
+ok = ok and rec.returncode == 0
 print("ALL OK" if ok else "FAILED")
 sys.exit(0 if ok else 1)

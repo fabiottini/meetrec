@@ -15,7 +15,13 @@
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <StartupObject>MeetRec.Program</StartupObject>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- the recorder is built into MeetRec.exe (MeetRec.exe --capture ...): one .NET runtime in the zip -->
+    <Compile Include="..\capture\Program.cs" Link="Capture\Recorder.cs" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />

@@ -1,7 +1,9 @@
 """Build the Windows zip: MeetRec\\ with the tray app, the recorder, meet.py, the locales and an
-embedded Python (no Python install needed). Runs on Windows (CI) after `dotnet publish` of both projects.
+embedded Python (no Python install needed). Runs on Windows (CI) after `dotnet publish` of windows/app.
 
-    python windows/package.py <app_publish_dir> <capture_publish_dir> <out_dir>
+    python windows/package.py <app_publish_dir> <out_dir>
+
+MeetRec.exe is also the recorder (MeetRec.exe --capture), so there is one .NET runtime in the zip.
 
 ffmpeg, whisper.cpp and the models are not in the zip: the setup in the app downloads them.
 """
@@ -12,19 +14,18 @@ import zipfile
 from pathlib import Path
 
 PYTHON = "3.12.10"
-app_pub, cap_pub, out = (Path(a) for a in sys.argv[1:4])
+app_pub, out = (Path(a) for a in sys.argv[1:3])
 root = Path(__file__).resolve().parent.parent
 stage = out / "MeetRec"
 shutil.rmtree(stage, ignore_errors=True)
 stage.mkdir(parents=True)
 
 shutil.copy2(app_pub / "MeetRec.exe", stage)
-shutil.copy2(cap_pub / "meetrec-capture.exe", stage)
 for f in ("meet.py", "VERSION", "LICENSE", "CHANGELOG.md"):
     shutil.copy2(root / f, stage)
 shutil.copytree(root / "locales", stage / "locales")
 # command line: meet.cmd next to the app (the setup can add this folder to PATH)
-(stage / "meet.cmd").write_text('@echo off\r\nset "MEETREC_CAPTURE=%~dp0meetrec-capture.exe"\r\n'
+(stage / "meet.cmd").write_text('@echo off\r\nset "MEETREC_CAPTURE=%~dp0MeetRec.exe"\r\n'
                                 '"%~dp0python\\python.exe" "%~dp0meet.py" %*\r\n', encoding="ascii")
 (stage / "README.txt").write_text(
     "MeetRec for Windows\r\n\r\n"

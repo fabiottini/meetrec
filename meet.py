@@ -80,7 +80,14 @@ def find_capture():
     return first_existing(os.environ.get("MEETREC_CAPTURE"),
                           APP_DIR.parent / "MacOS" / "meetrec-capture",
                           APP_DIR / f"meetrec-capture{EXE}",
+                          APP_DIR / "MeetRec.exe",
                           APP_DIR / "capture" / f"meetrec-capture{EXE}")
+
+def capture_cmd():
+    """the recorder command: on Windows the recorder lives inside MeetRec.exe (one .NET runtime, not two)"""
+    b = C["capture_bin"]
+    return [b, "--capture"] if Path(b).name.lower() == "meetrec.exe" else [b]
+
 
 DEFAULTS = {
     "recordings_dir": str(HOME / "Recordings" / "meetings"),
@@ -241,7 +248,7 @@ def cmd_start(a):
     start = now()
     d = Path(C["recordings_dir"]) / start.strftime("%Y-%m-%d_%H%M%S")
     d.mkdir(parents=True, exist_ok=True)
-    cmd = [C["capture_bin"], str(d)]
+    cmd = capture_cmd() + [str(d)]
     if a.no_mic:
         cmd.append("--no-mic")
     record_system = C["record_system"]
@@ -1791,7 +1798,7 @@ def cmd_voice_test(a):
         say(f"profiles: {', '.join(VOICE_PROFILES)}")
         return 1
     t = Path(tempfile.mkdtemp(prefix="meetrec-voice-"))
-    cmd = [C["capture_bin"], str(t / "r"), "--no-system"] + (["--mic-id", C["mic_id"]] if C.get("mic_id") else [])
+    cmd = capture_cmd() + [str(t / "r"), "--no-system"] + (["--mic-id", C["mic_id"]] if C.get("mic_id") else [])
     say(f"speak now: recording {a.seconds} seconds…")
     p = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     time.sleep(a.seconds)
@@ -2166,7 +2173,7 @@ def cmd_recover(a):
 
 
 def cmd_mics(a):
-    return subprocess.call([C["capture_bin"], "--list-mics"])
+    return subprocess.call(capture_cmd() + ["--list-mics"])
 
 
 def app_version():

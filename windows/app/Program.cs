@@ -2,6 +2,7 @@
 //
 //   MeetRec.exe                       the tray app (one instance)
 //   MeetRec.exe <audio file>          import that file (e.g. "Open with")
+//   MeetRec.exe --capture ...         the recorder (see windows/capture), started by meet.py
 //   MeetRec.exe --self-test           checks for CI: Python, meet.py, recorder, locales, menus, dialogs
 //   MeetRec.exe --render-docs <dir>   PNG images of the menu and dialogs, with demo data
 
@@ -26,6 +27,7 @@ static class Program
     [STAThread]
     static int Main(string[] args)
     {
+        if (args.Length > 0 && args[0] == "--capture") return MeetRec.Capture.Program.Main(args[1..]);
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);

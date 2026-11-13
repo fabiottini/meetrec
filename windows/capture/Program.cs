@@ -118,7 +118,7 @@ sealed class Track
     }
 }
 
-static class Program
+public static class Program
 {
     static readonly Stopwatch clock = Stopwatch.StartNew();
     static readonly Guid IeeeFloat = new("00000003-0000-0010-8000-00aa00389b71");
@@ -157,9 +157,10 @@ static class Program
         return out16;
     }
 
-    static int Main(string[] args)
+    /// also called by MeetRec.exe --capture (the Windows app ships one exe)
+    public static int Main(string[] args)
     {
-        Console.OutputEncoding = Encoding.UTF8;
+        try { Console.OutputEncoding = Encoding.UTF8; } catch { }
         if (args.Length > 0 && args[0] == "--list-mics") return ListMics();
         if (args.Length == 0 || args[0].StartsWith("-"))
         {
@@ -268,7 +269,7 @@ static class Program
     static void Loop(string dir, Track system, Track mic, bool hasSystem, bool hasMic, Func<string?> failure,
                      AudioEndpointVolume? vol)
     {
-        Console.CancelKeyPress += (_, e) => { e.Cancel = true; stopRequested = true; };
+        try { Console.CancelKeyPress += (_, e) => { e.Cancel = true; stopRequested = true; }; } catch { }
         var lastGain = DateTime.MinValue;
         string levels = Path.Combine(dir, "levels");
         while (!stopRequested && failure() == null && !File.Exists(Path.Combine(dir, "stop.request")))
