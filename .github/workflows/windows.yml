@@ -61,3 +61,35 @@ jobs:
           ffmpeg -version | Select-Object -First 1
           & $env:WHISPER --help 2>&1 | Select-Object -First 1
           python scripts/test_core.py call.wav --whisper "$env:WHISPER" --model models/ggml-tiny.bin --vad models/ggml-silero-v6.2.0.bin --word release
+
+  recorder:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build meetrec-capture.exe
+        shell: pwsh
+        run: |
+          dotnet publish windows/capture/MeetRecCapture.csproj -c Release -o out
+          Get-Item out/meetrec-capture.exe | Select-Object Name, Length
+
+      - name: List microphones (the runner may have none)
+        shell: pwsh
+        run: |
+          & ./out/meetrec-capture.exe --list-mics
+          "exit $LASTEXITCODE"
+
+      - name: Synthetic recording through the real writer and stop protocol
+        shell: pwsh
+        run: |
+          choco install ffmpeg -y --no-progress | Out-Null
+          python scripts/test_recorder.py out/meetrec-capture.exe
