@@ -27,7 +27,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          choco install ffmpeg -y --no-progress | Out-Null
+          python windows/ci_ffmpeg.py
           python -c @"
           import json, os, urllib.request, zipfile, pathlib
           h = {'Authorization': 'Bearer ' + os.environ['GH_TOKEN'], 'User-Agent': 'meetrec-ci'}
@@ -88,11 +88,13 @@ jobs:
           & ./out/meetrec-capture.exe --list-mics
           "exit $LASTEXITCODE"
 
+      - name: ffmpeg (same download as the app setup)
+        shell: pwsh
+        run: python windows/ci_ffmpeg.py
+
       - name: Synthetic recording through the real writer and stop protocol
         shell: pwsh
-        run: |
-          choco install ffmpeg -y --no-progress | Out-Null
-          python scripts/test_recorder.py out/meetrec-capture.exe
+        run: python scripts/test_recorder.py out/meetrec-capture.exe
 
   app:
     runs-on: windows-latest
@@ -115,7 +117,7 @@ jobs:
       - name: Package MeetRec-windows.zip
         shell: pwsh
         run: |
-          choco install ffmpeg -y --no-progress | Out-Null
+          python windows/ci_ffmpeg.py
           python windows/package.py pub/app dist-win
 
       - name: Self test from the unzipped package, images of the UI
