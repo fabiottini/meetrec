@@ -4,6 +4,14 @@ Versions follow [Semantic Versioning](https://semver.org/): MAJOR.MINOR.PATCH.
 MAJOR for changes that break existing use (config, CLI, notes), MINOR for new features,
 PATCH for fixes. Every release has a git tag `vX.Y.Z` (`make tag`).
 
+## 1.5.0 – 2026-11-13
+
+- Notes follow the meeting language (Settings > Meeting language): English meetings get English
+  headings, labels and summary; Italian meetings are unchanged.
+- The level panel follows the width of the menu (macOS makes the menu wider for shortcuts and
+  icons): waveform, meters and slider stretch, buttons stay on the right edge.
+- README: the example note is in English.
+
 ## 1.4.0 – 2026-11-13
 
 - **Instructions for Claude** when you stop a recording (e.g. "remove the part where I talk to people

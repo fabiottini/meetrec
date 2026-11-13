@@ -77,11 +77,14 @@ final class LevelView: NSView {
 
     init() {
         super.init(frame: NSRect(x: 0, y: 0, width: 330, height: 222))
+        // the menu decides its width (shortcuts, icons, margins): the panel follows it
+        autoresizingMask = [.width]
         slider.frame = NSRect(x: 16, y: 164, width: 210, height: 20)
         slider.target = self; slider.action = #selector(sliderMoved)
         slider.isContinuous = true
         volLabel.frame = NSRect(x: 232, y: 166, width: 90, height: 16)
         volLabel.font = .systemFont(ofSize: 11); volLabel.textColor = .secondaryLabelColor
+        volLabel.alignment = .right
         agcBox.frame = NSRect(x: 14, y: 192, width: 300, height: 20)
         agcBox.font = .systemFont(ofSize: 12)
         agcBox.target = self; agcBox.action = #selector(agcToggled)
@@ -99,6 +102,22 @@ final class LevelView: NSView {
         addSubview(slider); addSubview(volLabel); addSubview(agcBox); addSubview(muteButton); addSubview(testButton)
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    override func resizeSubviews(withOldSize old: NSSize) {
+        super.resizeSubviews(withOldSize: old)
+        relayout()
+    }
+
+    /// controls anchored to the right edge, slider stretched: works for any menu width
+    func relayout() {
+        let right = bounds.width - 16
+        muteButton.frame.origin.x = right - muteButton.frame.width
+        testButton.frame.origin.x = right - testButton.frame.width
+        volLabel.frame.origin.x = right - volLabel.frame.width
+        slider.frame.size.width = max(120, volLabel.frame.minX - 8 - slider.frame.minX)
+        agcBox.frame.size.width = bounds.width - 30
+        needsDisplay = true
+    }
 
     @objc func sliderMoved() { onVolume?(Float(slider.doubleValue / 100)) }
     @objc func agcToggled() { onAutoGain?(agcBox.state == .on) }
@@ -150,7 +169,7 @@ final class LevelView: NSView {
     func meter(_ label: String, _ v: (rms: Double, peak: Double)?, y: CGFloat) {
         let font = NSFont.systemFont(ofSize: 11)
         (label as NSString).draw(at: NSPoint(x: 16, y: y - 1), withAttributes: [.font: font, .foregroundColor: NSColor.secondaryLabelColor])
-        let r = NSRect(x: 60, y: y, width: 254, height: 10)
+        let r = NSRect(x: 60, y: y, width: bounds.width - 76, height: 10)
         NSColor.quaternaryLabelColor.setFill()
         NSBezierPath(roundedRect: r, xRadius: 3, yRadius: 3).fill()
         guard let v else {
@@ -182,10 +201,10 @@ final class LevelView: NSView {
         (txt as NSString).draw(at: NSPoint(x: 16, y: 22), withAttributes: [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: col])
 
         // waveform of the mic, last ~9 s
-        let wave = NSRect(x: 16, y: 42, width: 298, height: 40)
+        let wave = NSRect(x: 16, y: 42, width: bounds.width - 32, height: 40)
         NSColor.quaternaryLabelColor.withAlphaComponent(0.25).setFill()
         NSBezierPath(roundedRect: wave, xRadius: 4, yRadius: 4).fill()
-        let bw: CGFloat = 298 / 90
+        let bw: CGFloat = wave.width / 90
         for (i, db) in history.enumerated() {
             let h = max(1, wave.height * LevelView.frac(db))
             let x = wave.maxX - CGFloat(history.count - i) * bw
@@ -199,7 +218,7 @@ final class LevelView: NSView {
         if !note.isEmpty {
             // the note never runs under the Test mic button
             let np = NSMutableParagraphStyle(); np.lineBreakMode = .byTruncatingTail
-            (note as NSString).draw(in: NSRect(x: 16, y: 135, width: (testButton.isHidden ? 298 : testButton.frame.minX - 24), height: 14),
+            (note as NSString).draw(in: NSRect(x: 16, y: 135, width: (testButton.isHidden ? bounds.width - 32 : testButton.frame.minX - 24), height: 14),
                 withAttributes: [.font: NSFont.systemFont(ofSize: 10), .foregroundColor: NSColor.tertiaryLabelColor, .paragraphStyle: np])
         }
     }

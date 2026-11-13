@@ -1338,6 +1338,11 @@ func renderDocs(_ dir: String, _ d: AppDelegate) {
         lv2.setVolume(0.62); lv2.agcBox.state = .on; lv2.agcBox.title = lv.agcBox.title
         lv2.setMuted(false, unsupported: false)
         let itemsH = items.reduce(CGFloat(0)) { $0 + ($1.isSeparatorItem ? sepH : rowH) }
+        // like macOS: the menu is as wide as its longest item plus the shortcut column; the panel follows
+        let font0 = NSFont.menuFont(ofSize: 13)
+        let widest = items.map { ($0.title as NSString).size(withAttributes: [.font: font0]).width + ($0.keyEquivalent.isEmpty && $0.submenu == nil ? 32 : 110) }.max() ?? 0
+        let forced = Double(ProcessInfo.processInfo.environment["MEETREC_DOCS_MENUWIDTH"] ?? "") ?? 0
+        lv2.setFrameSize(NSSize(width: max(lv2.frame.width, widest, CGFloat(forced)), height: lv2.frame.height))
         let menuView = FlippedView(frame: NSRect(x: 0, y: 0, width: lv2.frame.width, height: lv2.frame.height + itemsH + pad * 2))
         menuView.appearance = dark
         menuView.wantsLayer = true
