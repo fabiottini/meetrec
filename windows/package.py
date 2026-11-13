@@ -13,7 +13,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-PYTHON = "3.12.10"
+PYTHON = "3.14.10"   # latest 3.14: bugfix support until 2027-10, Windows embeddable zip on python.org
 app_pub, out = (Path(a) for a in sys.argv[1:3])
 root = Path(__file__).resolve().parent.parent
 stage = out / "MeetRec"

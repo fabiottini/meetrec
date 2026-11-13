@@ -3,6 +3,7 @@ name: windows
 # Windows: meet.py end to end (whisper.cpp for Windows, ffmpeg, UTF-8 notes), the recorder with
 # synthetic audio, the tray app self test from the unzipped package. On a tag vX.Y.Z the package
 # is attached to the GitHub release as MeetRec-windows.zip (created by `make tag`).
+# Actions are pinned to commit SHAs (the comment says the version).
 
 on:
   push:
@@ -18,11 +19,11 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: '3.12'
+          python-version: '3.14'
 
       - name: Tools - ffmpeg, whisper.cpp (Windows build), models
         shell: pwsh
@@ -68,15 +69,15 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '10.0.x'
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: '3.12'
+          python-version: '3.14'
 
       - name: Build meetrec-capture.exe
         shell: pwsh
@@ -102,19 +103,26 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '10.0.x'
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: '3.12'
+          python-version: '3.14'
 
       - name: Build the tray app (recorder included)
         shell: pwsh
         run: dotnet publish windows/app/MeetRec.csproj -c Release -o pub/app
+
+      - name: No known vulnerable NuGet packages (direct and transitive)
+        shell: pwsh
+        run: |
+          $out = dotnet list windows/app/MeetRec.csproj package --vulnerable --include-transitive 2>&1 | Out-String
+          $out
+          if ($out -match 'has the following vulnerable packages') { exit 1 }
 
       - name: Package MeetRec-windows.zip
         shell: pwsh
@@ -126,7 +134,7 @@ jobs:
         shell: pwsh
         run: python windows/test_app.py dist-win/MeetRec-windows.zip ui
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: MeetRec-windows
@@ -135,16 +143,19 @@ jobs:
             ui/*.png
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    # on branches it only checks that the package is where the upload expects it
     needs: [core, recorder, app]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: MeetRec-windows
+      - name: Package present
+        run: ls -l dist-win/MeetRec-windows.zip
       - name: Attach MeetRec-windows.zip to the release
+        if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}

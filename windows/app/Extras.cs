@@ -84,6 +84,12 @@ static partial class Extras
     static partial void MoreDocs(List<(string, Func<Form>)> list)
     {
         list.Add(("settings", () => new SettingsForm(load: false)));
+        list.Add(("settings-ai", () =>
+        {
+            var f = new SettingsForm(load: false);
+            f.Shown += (_, _) => f.AutoScrollPosition = new Point(0, 100000);    // the AI section, at the bottom
+            return f;
+        }));
         list.Add(("setup", () => new SetupForm(load: false)));
         list.Add(("guide-microsoft", () => Guides.Microsoft(null, _ => { }, show: false)));
         list.Add(("call-prompt", CallPrompt.Demo));

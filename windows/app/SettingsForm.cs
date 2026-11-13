@@ -17,14 +17,21 @@ sealed class SettingsForm : Form
     TextBox recordingsDir = null!, vault = null!, meetingsDir = null!, peopleDir = null!, context = null!;
     ComboBox ui = null!, mic = null!, lang = null!, record = null!, transcript = null!, voice = null!, scope = null!, after = null!;
     CheckBox keepRaw = null!, keepTracks = null!, callPrompt = null!, summary = null!, atLogin = null!;
+    ComboBox aiProvider = null!;
+    TextBox aiModel = null!, aiBaseUrl = null!, aiCommand = null!, aiKey = null!;
+    Label aiStatus = null!;
+    Dictionary<string, bool> aiKeys = new();
     Label account = null!;
 
     static string S(JsonObject o, string k, string d) { try { return o[k]?.GetValue<string>() ?? d; } catch { return d; } }
     static bool B(JsonObject o, string k, bool d) { try { return o[k]?.GetValue<bool>() ?? d; } catch { return d; } }
 
+    readonly bool loadAll;
+
     public SettingsForm(Action? openSetup = null, bool load = true)
     {
         this.openSetup = openSetup;
+        loadAll = load;
         Text = "MeetRec – " + T("settings_2");
         Icon = Icons.App;
         Font = SystemFonts.MessageBoxFont;
@@ -133,7 +140,8 @@ sealed class SettingsForm : Form
         meetingsDir = Row(T("meetings_folder_relative_to_vault"), new TextBox { Text = S(raw, "meetings_dir", ""), Width = 300 });
         peopleDir = Row(T("people_folder_relative_to_vault"), new TextBox { Text = S(raw, "people_dir", ""), Width = 300 });
         context = Row(T("frontmatter_context"), new TextBox { Text = S(raw, "context", "work"), Width = 160 });
-        summary = Check(T("automatic_summary_with_claude_text_only"), B(raw, "summary", true));
+
+        BuildAi();
 
         Section(T("cal_title"));
         account = Row("", new Label { Text = "…", AutoSize = true, MaximumSize = new Size(420, 0) });
@@ -154,6 +162,84 @@ sealed class SettingsForm : Form
         bottom.Controls.Add(saved);
         grid.Controls.Add(bottom);
         grid.SetColumnSpan(bottom, 2);
+    }
+
+    static readonly string[] KeyProviders = { "anthropic", "openai", "openai-compatible" };
+
+    /// AI for the summary and the instructions: provider, model, URL, own command, API key, test
+    void BuildAi()
+    {
+        Section(T("ai_section"));
+        summary = Check(T("ai_summary_toggle"), B(raw, "summary", true));
+        aiProvider = Row(T("ai_provider"), Grid.Combo(Program.AiProviders.Select(p => (p.tag, T(p.key))), S(raw, "ai_provider", "claude-code"), 420));
+        aiModel = Row(T("ai_model"), new TextBox { Text = S(raw, "ai_model", ""), Width = 300 });
+        aiBaseUrl = Row(T("ai_base_url"), new TextBox { Text = S(raw, "ai_base_url", ""), Width = 300, PlaceholderText = "http://localhost:11434/v1" });
+        string cmd;
+        try { cmd = raw["summary_cmd"] is JsonArray a ? string.Join(" ", a.Select(x => x!.GetValue<string>())) : S(raw, "summary_cmd", ""); }
+        catch { cmd = ""; }
+        aiCommand = Row(T("ai_command"), new TextBox { Text = cmd, Width = 300, PlaceholderText = "ollama run llama3" });
+        var keyRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = Padding.Empty };
+        aiKey = new TextBox { Width = 220, UseSystemPasswordChar = true };
+        var saveKey = new Button { Text = T("ai_key_save"), AutoSize = true };
+        var removeKey = new Button { Text = T("ai_key_remove"), AutoSize = true };
+        keyRow.Controls.Add(aiKey); keyRow.Controls.Add(saveKey); keyRow.Controls.Add(removeKey);
+        Row(T("ai_api_key"), keyRow);
+        var testRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = Padding.Empty };
+        var test = new Button { Text = T("ai_test"), AutoSize = true };
+        aiStatus = new Label { AutoSize = true, MaximumSize = new Size(380, 0), ForeColor = SystemColors.GrayText, Margin = new Padding(8, 6, 0, 0) };
+        testRow.Controls.Add(test); testRow.Controls.Add(aiStatus);
+        Row("", testRow);
+        Row("", new Label { Text = T("ai_privacy_note"), AutoSize = true, MaximumSize = new Size(480, 0), ForeColor = SystemColors.GrayText });
+
+        void Update()
+        {
+            var p = Grid.Selected(aiProvider);
+            aiModel.Enabled = p is not ("none" or "command");
+            aiModel.PlaceholderText = p switch
+            {
+                "claude-code" => T("ai_model_default", ("m", "sonnet")),
+                "anthropic" => T("ai_model_default", ("m", "claude-opus-5-5")),
+                "codex" => T("ai_model_default", ("m", "Codex")),
+                "none" or "command" => "",
+                _ => T("ai_model_required"),
+            };
+            aiBaseUrl.Enabled = p == "openai-compatible";
+            aiCommand.Enabled = p == "command";
+            bool needsKey = KeyProviders.Contains(p);
+            aiKey.Enabled = saveKey.Enabled = needsKey;
+            removeKey.Enabled = needsKey && aiKeys.GetValueOrDefault(p);
+            aiKey.PlaceholderText = !needsKey ? "" : aiKeys.GetValueOrDefault(p) ? T("ai_key_saved") : T("ai_key_none");
+            test.Enabled = p != "none";
+        }
+        aiProvider.SelectedIndexChanged += (_, _) => Update();
+        saveKey.Click += (_, _) =>
+        {
+            var k = aiKey.Text.Trim();
+            if (k.Length == 0) return;
+            aiKey.Text = "";
+            Save();
+            Meet.Run(new[] { "ai", "key", Grid.Selected(aiProvider) }, (_, o) => { aiStatus.Text = Meet.LastLine(o).Replace("[meet] ", ""); LoadAi(Update); }, input: k);
+        };
+        removeKey.Click += (_, _) => Meet.Run(new[] { "ai", "key", Grid.Selected(aiProvider), "--delete" }, (_, _) => { aiStatus.Text = T("ai_key_removed"); LoadAi(Update); });
+        test.Click += (_, _) =>
+        {
+            Save();
+            aiStatus.Text = T("ai_testing");
+            Meet.Run(new[] { "ai", "test" }, (_, o) => { if (!IsDisposed) aiStatus.Text = Meet.LastLine(o).Replace("[meet] ", ""); });
+        };
+        Update();
+        if (loadAll) LoadAi(Update);
+    }
+
+    void LoadAi(Action then)
+    {
+        Meet.Run(new[] { "ai", "--json" }, (_, o) =>
+        {
+            if (IsDisposed) return;
+            if (Meet.LastJson(o)?["keys"] is JsonObject keys)
+                aiKeys = keys.ToDictionary(k => k.Key, k => k.Value?.GetValue<bool>() ?? false);
+            then();
+        });
     }
 
     void LoadMics()
@@ -202,6 +288,10 @@ sealed class SettingsForm : Form
         raw["voice_profile"] = Grid.Selected(voice);
         raw["voice_profile_scope"] = Grid.Selected(scope);
         raw["after_process_audio"] = Grid.Selected(after);
+        raw["ai_provider"] = Grid.Selected(aiProvider);
+        raw["ai_model"] = aiModel.Text.Trim();
+        raw["ai_base_url"] = aiBaseUrl.Text.Trim();
+        if (Grid.Selected(aiProvider) == "command") raw["summary_cmd"] = aiCommand.Text.Trim();
         Config.Save(raw);
         if (I18n.Lang != Grid.Selected(ui)) { I18n.Lang = Grid.Selected(ui); I18n.Reload(); }
         saved.Text = T("saved");

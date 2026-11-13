@@ -4,6 +4,26 @@ Versions follow [Semantic Versioning](https://semver.org/): MAJOR.MINOR.PATCH.
 MAJOR for changes that break existing use (config, CLI, notes), MINOR for new features,
 PATCH for fixes. Every release has a git tag `vX.Y.Z` (`make tag`).
 
+## 1.8.0 – 2026-11-13
+
+- **AI of your choice** for the summary and the instructions (Settings > AI, macOS and Windows):
+  Claude Code or Codex on the computer, Claude API or OpenAI API with an API key, any
+  OpenAI-compatible service (Ollama, LM Studio, OpenRouter…), your own command, or off. Model and URL
+  configurable, keys stored readable only by you (`meet ai key`), **Test** button (`meet ai test`),
+  status in Setup. Older configs keep working (a custom `summary_cmd` becomes "My own command").
+- Claude Code and Codex are found also outside the PATH of the app (~/.local/bin, npm, Homebrew).
+
+Security and maintenance:
+
+- The summary and the instructions run Claude Code with no tools, no MCP servers, no skills and no
+  saved session: the transcript is untrusted text, so it can only produce the answer. Also fixed the
+  working folder for Claude on Windows.
+- Downloads verified with SHA-256: the speech models (macOS and Windows setup), ffmpeg and whisper.cpp
+  (Windows setup).
+- Windows: .NET 10 LTS (.NET 8 reached end of support on 2026-11-10), embedded Python 3.14.10,
+  CI check for vulnerable NuGet packages, GitHub Actions pinned to commit SHAs.
+- README: quick start for Windows and macOS, security section.
+
 ## 1.7.0 – 2026-11-13
 
 - **Windows (beta)**: `MeetRec-windows.zip` on every release. Tray app with the same menu and flows

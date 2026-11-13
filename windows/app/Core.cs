@@ -195,7 +195,8 @@ static class Meet
         return psi;
     }
 
-    public static Process? Run(IEnumerable<string> args, Action<int, string> done, Action<string>? onLine = null)
+    /// input: written to stdin (API keys travel this way, never in the arguments)
+    public static Process? Run(IEnumerable<string> args, Action<int, string> done, Action<string>? onLine = null, string? input = null)
     {
         var list = args.ToList();
         var psi = StartInfo(list);
@@ -225,6 +226,7 @@ static class Meet
         {
             Log.Append($"[app] meet {string.Join(' ', list)}\n");
             p.Start();
+            if (input != null) p.StandardInput.WriteLine(input);
             p.StandardInput.Close();
             p.BeginOutputReadLine();
             p.BeginErrorReadLine();
