@@ -446,6 +446,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     var processingStep = ""
     var lastNote: String? = UserDefaults.standard.string(forKey: "lastNote")
     var recover: [[String: Any]] = []
+    var recent: [[String: Any]] = []           // processed recordings, for "Recordings" (edit afterwards)
     var settingsWindow: NSWindow?
     let settings = Settings()
     let setup = SetupModel()
@@ -642,6 +643,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             if let d = out.data(using: .utf8),
                let arr = try? JSONSerialization.jsonObject(with: d) as? [[String: Any]] { self.recover = arr }
         }
+        runMeet(["list", "--json", "--n", "15"]) { _, out in
+            if let line = out.split(separator: "\n").last,
+               let arr = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [[String: Any]] { self.recent = arr }
+        }
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
@@ -692,6 +697,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         }
         _ = add(T("import_audio_file"), processing ? nil : #selector(importAudio), key: "i")
         _ = add(T("open_recordings_folder"), #selector(openRecordings))
+        if !recent.isEmpty {
+            // processed recordings: open the note, cut the audio afterwards, process again with instructions
+            let sub = NSMenu()
+            for r in recent {
+                let when = (r["started_at"] as? String ?? "").prefix(16).replacingOccurrences(of: "T", with: " ")
+                let item = NSMenuItem(title: fitMenuTitle("\(when) · \(r["title"] as? String ?? "")", room: 300), action: nil, keyEquivalent: "")
+                let acts = NSMenu()
+                let open = NSMenuItem(title: T("open_note"), action: (r["note_exists"] as? Bool ?? false) ? #selector(openNoteOf(_:)) : nil, keyEquivalent: "")
+                open.target = self; open.representedObject = r["note"]
+                let edit = NSMenuItem(title: T("edit_audio"), action: (r["has_audio"] as? Bool ?? false) && !processing ? #selector(editAfter(_:)) : nil, keyEquivalent: "")
+                edit.target = self; edit.representedObject = r["dir"]
+                let again = NSMenuItem(title: T("reprocess_with_instructions"), action: processing ? nil : #selector(reprocessWithInstructions(_:)), keyEquivalent: "")
+                again.target = self; again.representedObject = r
+                acts.addItem(open); acts.addItem(edit); acts.addItem(again)
+                if !(r["has_audio"] as? Bool ?? false) {
+                    let note = NSMenuItem(title: T("audio_deleted_short"), action: nil, keyEquivalent: "")
+                    acts.addItem(note)
+                }
+                item.submenu = acts
+                sub.addItem(item)
+            }
+            let m = add(T("recordings_menu"), nil)
+            m.isEnabled = true; m.submenu = sub
+        }
         if !recover.isEmpty {
             let sub = NSMenu()
             for r in recover {
@@ -1020,6 +1049,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         }
     }
 
+    @objc func openNoteOf(_ sender: NSMenuItem) {
+        if let n = sender.representedObject as? String { openObsidian(n) }
+    }
+
+    /// a processed recording: cut parts in the editor; transcript and note follow (no new transcription)
+    @objc func editAfter(_ sender: NSMenuItem) {
+        guard let d = sender.representedObject as? String else { return }
+        AudioEditor.open(dir: d) { cuts in
+            guard let cuts, !cuts.isEmpty else { return }
+            let ranges = cuts.map { String(format: "%.2f-%.2f", $0.0, $0.1) }.joined(separator: ",")
+            self.runPipeline(["edit", d, ranges])
+        }
+    }
+
+    @objc func reprocessWithInstructions(_ sender: NSMenuItem) {
+        guard let r = sender.representedObject as? [String: Any], let d = r["dir"] as? String else { return }
+        let a = NSAlert()
+        a.messageText = T("reprocess_title")
+        a.informativeText = T("reprocess_info")
+        let f = NSTextField(frame: NSRect(x: 0, y: 0, width: 420, height: 24))
+        f.stringValue = r["instructions"] as? String ?? ""
+        f.placeholderString = T("instructions_placeholder")
+        a.accessoryView = f
+        a.addButton(withTitle: T("reprocess_button")); a.addButton(withTitle: T("cancel"))
+        NSApp.activate(ignoringOtherApps: true)
+        a.window.initialFirstResponder = f
+        guard a.runModal() == .alertFirstButtonReturn else { return }
+        let text = f.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        runPipeline(["process", d] + (text.isEmpty ? [] : ["--instructions", text]))
+    }
+
     @objc func editDir(_ sender: NSMenuItem) {
         guard let d = sender.representedObject as? String else { return }
         openEditor(d) { applied in if applied { self.chooseEventThenProcess(d) } else { self.loadRecover() } }
@@ -1319,6 +1379,8 @@ func renderDocs(_ dir: String, _ d: AppDelegate) {
     d.lastNote = ProcessInfo.processInfo.environment["MEETREC_DOCS_LASTNOTE"] ?? "/Users/you/Obsidian/Notes/Work/Meetings/2026-11/2026-11-09 - Weekly product sync.md"
     d.recover = [["started_at": "2026-11-06T15:02:11+01:00", "duration": "0h23m10s", "title": "Supplier call",
                   "dir": "/Users/you/Recordings/meetings/2026-11-06_150211"]]
+    d.recent = [["started_at": "2026-11-09T10:00:12+01:00", "title": "Weekly product sync", "note": "/x.md", "note_exists": true,
+                 "has_audio": true, "dir": "/Users/you/Recordings/meetings/2026-11-09_100012", "instructions": ""]]
     func drawMenu(_ file: String, recording: Bool) {
         d.docsRecording = recording ? Date().addingTimeInterval(-(12 * 60 + 34)) : nil
         let menu = NSMenu()

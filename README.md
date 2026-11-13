@@ -104,6 +104,13 @@ Or tick **Review and cut the audio before transcribing**: an editor shows the wh
 select parts by dragging, listen to them and cut them; the cuts are applied to every track, then the
 transcription starts. Recordings in **To process** have **Edit audio…** too.
 
+**Afterwards, too.** The **Recordings** menu lists the processed meetings: **Edit audio…** opens the
+same editor on a recording that is already transcribed; the cut parts disappear from the audio, the
+sentences in them from the transcript, the later times move back and the same note is written again,
+without transcribing again (so "Me" and "Others" stay). **Process again with instructions…** asks
+Claude to remove parts, as above. An imported audio file goes through the same dialog, so it can be
+cut before and after the transcript too.
+
 <p align="center"><img src="docs/tour-editor.png" width="760" alt="Audio editor: waveform, a cut in red, a selection, play and cut buttons"></p>
 
 **4. Not in any calendar?** "Something else: I'll write it…" asks for title, day, time, attendees and
@@ -357,6 +364,8 @@ meet stop                 # stop, transcribe, find the event, write the note
 meet stop --discard       # stop and delete the recording
 meet process <folder> --instructions "remove the part at the door"
 meet cut <folder> 10:32-12:05,1:00:10-1:02:00   # cut parts of the audio before transcribing
+meet list                                   # processed recordings
+meet edit <folder> 10:32-12:05              # cut a processed recording: audio, transcript and note updated
 meet start --mic-only | --with-system  [--transcript separate|mixed] [--voice-profile p1..p4] [--voice-scope mine|all]
 meet verify <folder>      # check note + transcript of a processed recording
 meet drop-audio <folder>  # delete its audio (only if verify is OK)

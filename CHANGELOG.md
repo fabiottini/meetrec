@@ -4,6 +4,18 @@ Versions follow [Semantic Versioning](https://semver.org/): MAJOR.MINOR.PATCH.
 MAJOR for changes that break existing use (config, CLI, notes), MINOR for new features,
 PATCH for fixes. Every release has a git tag `vX.Y.Z` (`make tag`).
 
+## 1.6.0 – 2026-11-13
+
+- Edit afterwards: menu **Recordings** with the processed meetings: open the note, **Edit audio…**
+  (the editor on a transcribed recording; cut parts leave the audio and the transcript, later times
+  move back, the same note is written again without transcribing again, speakers kept) and
+  **Process again with instructions…**. `meet list`, `meet edit`.
+- Transcription in short segments (about 30 characters, exact times also with the silence filter), so
+  cuts after the transcript are precise to the word.
+- Instructions: when they cut the audio, the saved transcription is realigned, so audio and
+  transcript always match and new instructions cut the audio again.
+- A lone "Grazie." is kept unless whisper stretched it over a long silence.
+
 ## 1.5.0 – 2026-11-13
 
 - Notes follow the meeting language (Settings > Meeting language): English meetings get English
