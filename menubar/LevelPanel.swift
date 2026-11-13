@@ -76,13 +76,13 @@ final class LevelView: NSView {
     override var isFlipped: Bool { true }
 
     init() {
-        super.init(frame: NSRect(x: 0, y: 0, width: 330, height: 206))
-        slider.frame = NSRect(x: 16, y: 146, width: 210, height: 20)
+        super.init(frame: NSRect(x: 0, y: 0, width: 330, height: 222))
+        slider.frame = NSRect(x: 16, y: 164, width: 210, height: 20)
         slider.target = self; slider.action = #selector(sliderMoved)
         slider.isContinuous = true
-        volLabel.frame = NSRect(x: 232, y: 148, width: 90, height: 16)
+        volLabel.frame = NSRect(x: 232, y: 166, width: 90, height: 16)
         volLabel.font = .systemFont(ofSize: 11); volLabel.textColor = .secondaryLabelColor
-        agcBox.frame = NSRect(x: 14, y: 174, width: 300, height: 20)
+        agcBox.frame = NSRect(x: 14, y: 192, width: 300, height: 20)
         agcBox.font = .systemFont(ofSize: 12)
         agcBox.target = self; agcBox.action = #selector(agcToggled)
         muteButton.frame = NSRect(x: 226, y: 6, width: 92, height: 24)
@@ -91,7 +91,7 @@ final class LevelView: NSView {
         muteButton.imageHugsTitle = true
         muteButton.imagePosition = .imageLeading
         muteButton.target = self; muteButton.action = #selector(muteClicked)
-        testButton.frame = NSRect(x: 214, y: 121, width: 104, height: 22)
+        testButton.frame = NSRect(x: 210, y: 130, width: 108, height: 24)
         testButton.bezelStyle = .rounded
         testButton.font = .systemFont(ofSize: 11)
         testButton.target = self; testButton.action = #selector(testClicked)
@@ -197,8 +197,10 @@ final class LevelView: NSView {
         meter(T("you"), mic, y: 92)
         meter(T("others"), sys, y: 110)
         if !note.isEmpty {
-            (note as NSString).draw(at: NSPoint(x: 16, y: 126),
-                withAttributes: [.font: NSFont.systemFont(ofSize: 10), .foregroundColor: NSColor.tertiaryLabelColor])
+            // the note never runs under the Test mic button
+            let np = NSMutableParagraphStyle(); np.lineBreakMode = .byTruncatingTail
+            (note as NSString).draw(in: NSRect(x: 16, y: 135, width: (testButton.isHidden ? 298 : testButton.frame.minX - 24), height: 14),
+                withAttributes: [.font: NSFont.systemFont(ofSize: 10), .foregroundColor: NSColor.tertiaryLabelColor, .paragraphStyle: np])
         }
     }
 }
