@@ -19,7 +19,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- the recorder is built into MeetRec.exe (MeetRec.exe --capture ...): one .NET runtime in the zip -->
+    <!-- the recorder is built into MeetRec.exe (MeetRec.exe with the capture option): one .NET runtime in the zip -->
     <Compile Include="..\capture\Program.cs" Link="Capture\Recorder.cs" />
   </ItemGroup>
 
