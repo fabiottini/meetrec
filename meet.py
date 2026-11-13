@@ -4,6 +4,7 @@
   meet start [-t TITLE]     start recording in background (mic + system audio)
   meet stop [--no-process | --discard]   stop and process (transcript + note), or stop and delete
   meet discard DIR          delete a recording folder
+  meet list                 processed recordings;  meet edit DIR 10:32-12:05   cut a processed one, note updated
   meet verify DIR / meet drop-audio DIR   check a processed recording / delete its audio (only if OK)
   meet voice-test p1..p4    hear a voice profile on a few seconds of your microphone
   meet rec [-t TITLE]       foreground: record until Ctrl-C, then process
@@ -417,7 +418,10 @@ def transcribe_whisper(d, tracks, lang):
         say(f"transcribing {n} ({probe_duration(d / f'{n}.wav') / 60:.0f} min audio)...")
         t = time.time()
         cmd = [C["whisper_bin"], "-m", C["whisper_model"], "-f", str(d / f"{n}.wav"), "-l", lang,
-               "-t", str(C["whisper_threads"]), "-oj", "-of", str(d / f"{n}.whisper"), "-np", "-pp"]
+               "-t", str(C["whisper_threads"]), "-oj", "-of", str(d / f"{n}.whisper"), "-np", "-pp",
+               # short segments (about 30 characters, split between words): each one has its own exact
+               # times also with the silence filter, so cuts after the transcript stay precise
+               "-ml", "30", "-sow"]
         if Path(C["vad_model"]).exists():
             cmd += ["--vad", "-vm", C["vad_model"]]
         p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
@@ -497,7 +501,9 @@ def clean_segments(data, speaker, levels=None):
     out = []
     for s in data.get("segments", []):
         text = s["text"].strip()
-        if not text or s.get("no_speech_prob", 0) > 0.6 or HALLUCINATIONS.search(text):
+        # a lone "Grazie." is a hallucination only when whisper stretched it over a long silence
+        halluc = HALLUCINATIONS.search(text) and (s["end"] - s["start"] > 2.5 or not re.fullmatch(r"\W*grazie\W*", text, re.I))
+        if not text or s.get("no_speech_prob", 0) > 0.6 or halluc:
             continue
         # whisper often stretches the first segment after silence back to the window start
         start = max(s["start"], s["end"] - max(2.0, len(text) / 12))
@@ -1227,6 +1233,7 @@ NOTE_TEXT = {
         "recording": "Registrazione: `{path}` ({dur} min, dalle {start} alle {end}).{altered}",
         "imported": "Importata dal file `{path}`.",
         "cut": "Audio tagliato prima della trascrizione: {a}–{b} (i tempi della trascrizione si riferiscono all'audio tagliato).",
+        "cut_after": "Audio tagliato dopo la trascrizione: {a}–{b} (frasi di quel tratto tolte, tempi riallineati).",
         "instructions": "Istruzioni date a Claude: _{text}_",
         "removed": "Rimosso su richiesta: {a}–{b} ({n} frasi{audio}). {why}", "removed_audio": ", tolte anche dall'audio",
         "not_applied": "Istruzioni non applicate: {why}",
@@ -1248,6 +1255,7 @@ NOTE_TEXT = {
         "recording": "Recording: `{path}` ({dur} min, from {start} to {end}).{altered}",
         "imported": "Imported from the file `{path}`.",
         "cut": "Audio cut before the transcript: {a}–{b} (transcript times refer to the cut audio).",
+        "cut_after": "Audio cut after the transcript: {a}–{b} (sentences in that part removed, times realigned).",
         "instructions": "Instructions given to Claude: _{text}_",
         "removed": "Removed on request: {a}–{b} ({n} sentences{audio}). {why}", "removed_audio": ", also from the audio",
         "not_applied": "Instructions not applied: {why}",
@@ -1459,7 +1467,7 @@ def write_note(d, meta, event, turns, single_track, summary_line, summary_body):
     if meta.get("source_file"):
         body += [NT(L, "imported", path=meta["source_file"]), ""]
     for c in meta.get("cuts", []):
-        body += [NT(L, "cut", a=c["from"], b=c["to"]), ""]
+        body += [NT(L, "cut_after" if c.get("after") else "cut", a=c["from"], b=c["to"]), ""]
     if meta.get("instructions"):
         body += [NT(L, "instructions", text=meta["instructions"]), ""]
     for r in meta.get("removed", []):
@@ -1512,6 +1520,13 @@ def process(d, instructions=None):
         # part to remove; then the sentences are grouped as usual
         sentences = apply_instructions(d, meta, merge(segs, levels, join=False, lang=note_lang(meta)))
         meta = read_json(d / "meta.json", meta)
+        if meta.pop("realigned_now", False):
+            # the saved transcription was just cut and realigned with the audio: build the note from
+            # it, exactly as any later re-processing will
+            segs = {n: read_json(d / f"{n}.segments.json", {}) for n in tracks}
+            levels = {n: track_levels(d, n) for n in tracks}
+            sentences = merge(segs, levels, join=False, lang=note_lang(meta))
+            write_json(d / "meta.json", meta)
         turns = join_turns(sentences)
     else:
         turns = merge(segs, levels, lang=note_lang(meta))
@@ -1857,6 +1872,101 @@ def cmd_peaks(a):
     return 0
 
 
+def removed_before(t, ranges):
+    return sum(max(0.0, min(e_, t) - s_) for s_, e_ in ranges if s_ < t)
+
+
+def shift_saved_transcription(d, ranges):
+    """after cutting the audio: drop the saved sentences that were in the cut parts and move the
+    later ones back, for every track; same for the per-second loudness"""
+    ranges = merge_ranges(ranges)
+    for f in d.glob("*.segments.json"):
+        data = read_json(f, {})
+        kept = []
+        for sg in data.get("segments", []):
+            a0, b0 = sg["start"], sg["end"]
+            inside = lambda t: any(s_ <= t < e_ for s_, e_ in ranges)
+            overlaps = any(s_ < b0 and e_ > a0 for s_, e_ in ranges)
+            sg = dict(sg)
+            if overlaps:
+                # segments are short (about 30 characters): place each word by its share of the
+                # characters and keep only the words outside the cut
+                words = sg["text"].split()
+                total = sum(len(w) + 1 for w in words) or 1
+                pos, kept_w, times = 0, [], []
+                for w in words:
+                    t = a0 + (pos + len(w) / 2) / total * (b0 - a0)
+                    pos += len(w) + 1
+                    if not inside(t):
+                        kept_w.append(w); times.append(t)
+                if not kept_w:
+                    continue
+                sg["text"] = " " + " ".join(kept_w)
+                a0 = max(a0, min(times) - 0.2) if inside(a0) else a0
+                b0 = min(b0, max(times) + 0.2) if inside(b0) else b0
+            sg["start"] = max(0.0, a0 - removed_before(a0, ranges))
+            sg["end"] = max(sg["start"], b0 - removed_before(b0, ranges))
+            kept.append(sg)
+        data["segments"] = kept
+        data["text"] = " ".join(x["text"].strip() for x in kept)
+        write_json(f, data)
+    for f in d.glob("*.levels.json"):
+        lv = read_json(f, [])
+        write_json(f, [v for i, v in enumerate(lv) if not any(s_ <= i + 0.5 < e_ for s_, e_ in ranges)])
+
+
+def edit_after(d, ranges):
+    """cut parts of an already processed recording without transcribing again: the audio is cut,
+    the saved transcription follows (speakers kept), the same note is written again"""
+    meta = read_json(d / "meta.json", {})
+    if meta.get("audio_deleted_at"):
+        say("the audio of this recording was deleted: nothing to edit")
+        return 1
+    ranges = merge_ranges(ranges)
+    if not ranges or not cut_ranges(d, ranges):
+        return 1
+    shift_saved_transcription(d, ranges)
+    meta = read_json(d / "meta.json", meta)
+    meta.setdefault("cuts", []).extend({"from": hms(s_), "to": hms(e_), "after": True} for s_, e_ in ranges)
+    write_json(d / "meta.json", meta)
+    if not any(d.glob("*.segments.json")):
+        return process(d)                       # never transcribed: transcribe the cut audio
+    return process(d)
+
+
+def cmd_edit(a):
+    d = Path(a.dir).expanduser().resolve()
+    ranges = []
+    for part in a.ranges.split(","):
+        if "-" in part:
+            s_, e_ = part.split("-", 1)
+            ranges.append((parse_time(s_), parse_time(e_)))
+    return edit_after(d, ranges)
+
+
+def cmd_list(a):
+    root_ = Path(C["recordings_dir"]).expanduser()
+    rows = []
+    for d in sorted(root_.glob("*/"), reverse=True):
+        m = read_json(d / "meta.json", {})
+        if not m.get("processed_at"):
+            continue
+        note = m.get("note") or ""
+        rows.append({"dir": str(d).rstrip("/"), "started_at": m.get("started_at"),
+                     "title": Path(note).stem.split(" - ", 1)[-1] if note else (m.get("title") or ""),
+                     "note": note, "note_exists": bool(note) and Path(note).exists(),
+                     "has_audio": (d / "mix.m4a").exists() and not m.get("audio_deleted_at"),
+                     "instructions": m.get("instructions") or ""})
+        if len(rows) >= a.n:
+            break
+    if a.json:
+        print(json.dumps(rows, ensure_ascii=False))
+    else:
+        for r in rows:
+            print(f"{(r['started_at'] or '')[:16].replace('T', ' ')}  {r['title']}  {'' if r['has_audio'] else '(no audio)'}  {r['dir']}")
+    return 0
+
+
 def cmd_cut(a):
     d = Path(a.dir).expanduser().resolve()
     if any(d.glob("*.s16")):
@@ -1944,8 +2054,16 @@ TRASCRIZIONE:
     ranges = [(turns[g[0] - 1]["start"], turns[g[-1] - 1]["end"]) for g in groups]
     meta["removed"] = [{"from": hms(s_), "to": hms(e_), "lines": len(g), "why": ans.get("why", "")}
                        for (s_, e_), g in zip(ranges, groups)]
-    if ranges and not meta.get("instructions_audio_cut") and not meta.get("audio_deleted_at"):
-        meta["instructions_audio_cut"] = cut_ranges(d, [(s_ - 0.3, e_ + 0.3) for s_, e_ in ranges])
+    if ranges and meta.get("instructions_audio_cut_for") != instructions and not meta.get("audio_deleted_at"):
+        padded = [(s_ - 0.3, e_ + 0.3) for s_, e_ in ranges]
+        meta["instructions_audio_cut"] = cut_ranges(d, padded)
+        if meta["instructions_audio_cut"]:
+            meta["instructions_audio_cut_for"] = instructions
+            # the saved transcription follows the cut audio: those sentences are gone from it and the
+            # later times move back, so re-processing stays consistent
+            shift_saved_transcription(d, padded)
+            meta["removed_lines"] = []
+            meta["realigned_now"] = True
     write_json(d / "meta.json", meta)
     say(f"instructions: {len(drop)} line(s) removed" + (f" ({ans.get('why', '')})" if drop else ""))
     return [t for i, t in enumerate(turns, 1) if i not in set(drop)]
@@ -2015,6 +2133,12 @@ def main():
     s = sub.add_parser("peaks", help="waveform of the recording as JSON (for the audio editor)")
     s.add_argument("dir")
     s.add_argument("--n", type=int, default=2000)
+    s = sub.add_parser("edit", help="cut parts of a processed recording: audio, transcript and note are updated")
+    s.add_argument("dir")
+    s.add_argument("ranges", help="10:32-12:05,1:00:10-1:02:00 (times of the current audio)")
+    s = sub.add_parser("list", help="processed recordings, newest first")
+    s.add_argument("--json", action="store_true")
+    s.add_argument("--n", type=int, default=15)
     s = sub.add_parser("cut", help="remove time ranges from the audio before transcribing: 10:32-12:05,1:00:10-1:02:00")
     s.add_argument("dir")
     s.add_argument("ranges")
@@ -2055,7 +2179,7 @@ def main():
     s.add_argument("profile")
     s.add_argument("--seconds", type=int, default=5)
     a = p.parse_args()
-    return {"start": cmd_start, "rec": cmd_rec, "stop": cmd_stop, "discard": cmd_discard, "status": cmd_status, "process": cmd_process, "prepare": cmd_prepare, "peaks": cmd_peaks, "cut": cmd_cut, "import": cmd_import,
+    return {"start": cmd_start, "rec": cmd_rec, "stop": cmd_stop, "discard": cmd_discard, "status": cmd_status, "process": cmd_process, "prepare": cmd_prepare, "peaks": cmd_peaks, "cut": cmd_cut, "edit": cmd_edit, "list": cmd_list, "import": cmd_import,
             "recover": cmd_recover, "candidates": cmd_candidates, "choose": cmd_choose,
             "accounts": cmd_accounts, "now": cmd_now, "account": cmd_account, "login": cmd_login, "logout": cmd_logout, "whoami": cmd_whoami, "events": cmd_events, "mics": cmd_mics,
             "verify": cmd_verify, "drop-audio": cmd_drop_audio, "voice-test": cmd_voice_test}[a.cmd](a)
