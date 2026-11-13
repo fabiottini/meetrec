@@ -5,6 +5,7 @@ import AppKit
 import ServiceManagement
 import SwiftUI
 import UniformTypeIdentifiers
+import Carbon.HIToolbox
 
 let home = FileManager.default.homeDirectoryForCurrentUser.path
 // meet.py and the recorder ship inside the app; outside a bundle (dev runs) fall back to the CLI wrapper
@@ -145,6 +146,26 @@ func openObsidian(_ notePath: String) {
     var c = URLComponents(string: "obsidian://open")!
     c.queryItems = [URLQueryItem(name: "path", value: notePath)]
     if let u = c.url { NSWorkspace.shared.open(u) }
+}
+
+// MARK: - global shortcut Control-Option-Command-R: start, or stop and process, from any app
+
+final class HotKey {
+    static var handler: (() -> Void)?
+    private static var ref: EventHotKeyRef?
+
+    static func register(_ h: @escaping () -> Void) {
+        handler = h
+        var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+        InstallEventHandler(GetApplicationEventTarget(), { _, _, _ in
+            DispatchQueue.main.async { HotKey.handler?() }
+            return noErr
+        }, 1, &spec, nil, nil)
+        let id = EventHotKeyID(signature: OSType(0x4D524543), id: 1)      // 'MREC'
+        let st = RegisterEventHotKey(UInt32(kVK_ANSI_R), UInt32(cmdKey | optionKey | controlKey), id,
+                                     GetApplicationEventTarget(), 0, &ref)
+        appendLog("[app] global shortcut ⌃⌥⌘R " + (st == noErr ? "registered" : "NOT registered (\(st)): used by another app?") + "\n")
+    }
 }
 
 // MARK: - config.json, read again only when the file changes (it is polled by the timers)
@@ -438,6 +459,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         }
         if !MicMute.shared.enabled { MicMute.shared.restoreAll() }
         startCallWatcher()
+        HotKey.register { [weak self] in self?.hotKeyPressed() }
         NotificationCenter.default.addObserver(forName: .init("MeetRecOpenSetup"), object: nil, queue: .main) { [weak self] _ in
             self?.openSetup()
         }
@@ -445,6 +467,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         loadRecover()
         // used to take README screenshots, and handy from a terminal: open -a MeetRec --args --settings
         let args = CommandLine.arguments
+        if args.contains("--bench-menu") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                var times: [Double] = []
+                for _ in 0..<5 {
+                    let t0 = Date()
+                    let m = NSMenu()
+                    self.menuNeedsUpdate(m)
+                    self.menuWillOpen(m)
+                    times.append(Date().timeIntervalSince(t0) * 1000)
+                    self.menuDidClose(m)
+                }
+                print("menu open (ms): " + times.map { String(format: "%.1f", $0) }.joined(separator: ", "))
+                exit(0)
+            }
+            return
+        }
         if !args.contains("--render-docs") {
             setup.refresh { [weak self] in
                 if self?.setup.requiredMissing == true || args.contains("--setup") { self?.openSetup() }
@@ -605,12 +643,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         if let c = cur {
             let t = c.title.map { " – \($0)" } ?? ""
             _ = add(c.alive ? T("recording_for") + elapsed(c.start) + t : T("the_recorder_stopped_stop_to_save"), nil)
-            _ = add(T("stop_and_process"), #selector(stopAndProcess), key: "s")
+            let sp = add(T("stop_and_process"), #selector(stopAndProcess), key: "r")
+            sp.keyEquivalentModifierMask = [.command, .option, .control]
             _ = add(T("stop_without_processing"), #selector(stopOnly))
             _ = add(T("stop_and_discard"), #selector(stopAndDiscard))
         } else {
             if processing { _ = add(T("processing") + processingStep, nil) }
-            _ = add(T("start_recording"), #selector(start), key: "r")
+            let st = add(T("start_recording"), #selector(start), key: "r")
+            st.keyEquivalentModifierMask = [.command, .option, .control]      // same as the global shortcut
 
             _ = add(T("start_with_title"), #selector(startWithTitle))
         }
@@ -748,7 +788,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             return [pid_t(pid)]
         }
         calls.onCallStart = { [weak self] app in
-            guard let self, self.callPromptEnabled(), self.current()?.alive != true, !self.processing else { return }
+            guard let self else { return }
+            let why = !self.callPromptEnabled() ? "prompt off in Settings" : self.current()?.alive == true ? "already recording"
+                    : self.processing ? "processing a recording" : ""
+            appendLog("[app] call detected: microphone used by \(app)" + (why.isEmpty ? ", prompt shown" : ", no prompt: \(why)") + "\n")
+            guard why.isEmpty else { return }
             let show = { (event: String) in
                 CallPrompt.shared.show(title: T("call_detected", ["app": app]),
                                        subtitle: event.isEmpty ? T("call_detected_sub") : event,
@@ -764,6 +808,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             }
         }
         calls.onCallEnd = { [weak self] app in
+            appendLog("[app] call ended: \(app) released the microphone\n")
             guard let self, self.callPromptEnabled(), self.current()?.alive == true else { return }
             CallPrompt.shared.show(title: T("call_ended", ["app": app]), subtitle: T("call_ended_sub"),
                                    primary: T("stop_and_process"), secondary: T("keep_recording"),
@@ -773,6 +818,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
 
     func runMeet3(_ args: [String], then: @escaping (String) -> Void) { runMeet(args) { _, out in then(out) } }
+
+    func hotKeyPressed() {
+        if current()?.alive == true {
+            notify("MeetRec", T("hotkey_stopping"))
+            stopAndProcess()
+        } else if processing {
+            notify("MeetRec", T("hotkey_busy"))
+        } else {
+            startRecording(title: nil)
+            if current()?.alive == true || UserDefaults.standard.bool(forKey: "consentAcknowledged") {
+                notify("MeetRec", T("hotkey_started"))
+            }
+        }
+    }
 
     @objc func toggleMute() {
         MicMute.shared.enabled.toggle()

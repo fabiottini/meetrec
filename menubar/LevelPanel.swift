@@ -63,6 +63,8 @@ final class LevelView: NSView {
     let slider = NSSlider(value: 50, minValue: 0, maxValue: 100, target: nil, action: nil)
     let volLabel = NSTextField(labelWithString: "")
     let agcBox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    let testButton = NSButton(title: "", target: nil, action: nil)
+    var onTest: (() -> Void)?
     let muteButton = NSButton(title: "", target: nil, action: nil)
     var muted = false
     var recording = false
@@ -89,13 +91,19 @@ final class LevelView: NSView {
         muteButton.imageHugsTitle = true
         muteButton.imagePosition = .imageLeading
         muteButton.target = self; muteButton.action = #selector(muteClicked)
-        addSubview(slider); addSubview(volLabel); addSubview(agcBox); addSubview(muteButton)
+        testButton.frame = NSRect(x: 214, y: 121, width: 104, height: 22)
+        testButton.bezelStyle = .rounded
+        testButton.font = .systemFont(ofSize: 11)
+        testButton.target = self; testButton.action = #selector(testClicked)
+        testButton.isHidden = true
+        addSubview(slider); addSubview(volLabel); addSubview(agcBox); addSubview(muteButton); addSubview(testButton)
     }
     required init?(coder: NSCoder) { fatalError() }
 
     @objc func sliderMoved() { onVolume?(Float(slider.doubleValue / 100)) }
     @objc func agcToggled() { onAutoGain?(agcBox.state == .on) }
     @objc func muteClicked() { onMute?() }
+    @objc func testClicked() { onTest?() }
 
     func setMuted(_ m: Bool, unsupported: Bool) {
         muted = m; muteUnsupported = unsupported
@@ -200,6 +208,10 @@ final class LevelController {
     let view = LevelView()
     private let preview = MicPreview()
     private var previewing = false
+    private var isOpen = false
+    // starting AVAudioEngine can take seconds (3 s with a Bluetooth headset): never on the main
+    // thread, never automatically, or the menu freezes while it opens
+    private let previewQueue = DispatchQueue(label: "meetrec.preview")
     private var timer: Timer?
     private var agc: AutoGain?
     var currentDir: () -> String? = { nil }
@@ -216,6 +228,7 @@ final class LevelController {
             MicVolume.set(d, v)
             self.view.setVolume(MicVolume.get(d))
         }
+        view.onTest = { [weak self] in self?.startPreview() }
         view.onAutoGain = { [weak self] on in
             guard let self else { return }
             var c = self.config(); c["auto_gain"] = on; self.saveConfig(c)
@@ -236,31 +249,51 @@ final class LevelController {
         view.setVolume(dev.flatMap(MicVolume.get))
         view.history = []
         agc = AutoGain(uid: uid, enabled: autoOn)
-        if currentDir() == nil {
-            let go = { self.previewing = self.preview.start(uid: uid)
-                       self.view.note = self.previewing ? T("preview_the_mic_is_listening_while_the") : T("mic_preview_not_available_permission") }
-            switch AVCaptureDevice.authorizationStatus(for: .audio) {
-            case .authorized: go()
-            case .notDetermined: AVCaptureDevice.requestAccess(for: .audio) { ok in DispatchQueue.main.async { if ok { go() } } }
-            default: view.note = T("microphone_permission_denied_to_meetrec_settings_privacy")
-            }
-        } else {
-            view.note = ""
-        }
+        isOpen = true
+        let idle = currentDir() == nil
+        view.note = idle ? T("preview_hint") : ""
+        view.testButton.title = T("test_mic")
+        view.testButton.isHidden = !idle
         let t = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in self?.tick() }
         RunLoop.main.add(t, forMode: .common)       // keeps running while the menu is tracking
         timer = t
     }
 
+    func startPreview() {
+        let uid = micUID()
+        view.testButton.isHidden = true
+        view.note = T("preview_starting")
+        let go = {
+            self.previewQueue.async {
+                let ok = self.preview.start(uid: uid)
+                DispatchQueue.main.async {
+                    guard self.isOpen else { self.previewQueue.async { self.preview.stop() }; return }
+                    self.previewing = ok
+                    self.view.note = ok ? T("preview_the_mic_is_listening_while_the") : T("mic_preview_not_available_permission")
+                }
+            }
+        }
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized: go()
+        case .notDetermined: AVCaptureDevice.requestAccess(for: .audio) { ok in DispatchQueue.main.async { if ok { go() } } }
+        default: view.note = T("microphone_permission_denied_to_meetrec_settings_privacy")
+        }
+    }
+
     func close() {
+        isOpen = false
         timer?.invalidate(); timer = nil
-        if previewing { preview.stop(); previewing = false }
+        if previewing {
+            previewing = false
+            previewQueue.async { self.preview.stop() }
+        }
     }
 
     private func tick() {
         let dev = MicVolume.deviceID(uid: micUID())
         if let dir = currentDir() {
-            if previewing { preview.stop(); previewing = false; view.note = "" }
+            if previewing { previewing = false; previewQueue.async { self.preview.stop() }; view.note = "" }
+            view.testButton.isHidden = true
             let l = LevelController.readLevels(dir)
             view.push(mic: l["mic"] ?? (-120, -120), sys: l["system"] ?? (-120, -120))
         } else if previewing {

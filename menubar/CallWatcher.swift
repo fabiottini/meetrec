@@ -78,8 +78,14 @@ final class CallWatcher {
         return bundle.isEmpty ? "pid \(pid)" : bundle
     }
 
+    private var lastUsers: [String] = []
+
     private func tick() {
         let users = micUsers()
+        if users != lastUsers {
+            appendLog("[app] microphone in use by: " + (users.isEmpty ? "nobody" : users.joined(separator: ", ")) + "\n")
+            lastUsers = users
+        }
         let now = Date()
         if let app = users.first {
             inactiveSince = nil

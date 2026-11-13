@@ -165,8 +165,9 @@ The top of the menu shows the level panel:
 - **Lower automatically when clipping**: lowers the volume by 15% each time the mic clips, at most
   once every 2 seconds. It never raises the volume.
 
-When the menu is open and you are not recording, the panel listens to the microphone, so you can
-set the level before the meeting.
+When you are not recording, **Test mic** in the panel listens to the microphone, so you can set the
+level before the meeting (it does not start by itself: with a Bluetooth headset that takes a few
+seconds and switches the headset to call mode).
 
 **Mute microphone** (menu item, ⌘M, or the Mute button in the panel) is a switch, off by default.
 When it is on:
@@ -316,6 +317,12 @@ process** / **Keep recording**. The prompt goes away by itself after a minute.
 It uses the macOS per-process microphone state: nothing is recorded until you press Record, and
 dictation and Siri are ignored. Turn it off in Settings ("Offer to record when a call starts",
 `call_prompt` in config.json). `meet now` lists the meetings going on now in every calendar.
+
+### Global shortcut
+
+**⌃⌥⌘R** (Control-Option-Command-R) works from any app: it starts a recording, or stops it and
+processes it if one is running. A notification confirms what happened. Handy when a call starts
+and the prompt did not appear.
 
 ### Import an audio file
 
