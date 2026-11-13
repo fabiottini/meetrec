@@ -104,9 +104,9 @@ sealed class WaveView : Control
                 var h = Math.Max(1, (float)Peaks[i] * (Height - 24));
                 g.FillRectangle(wave, x, mid - h / 2, Math.Max(1, bw - 0.3f), h);
             }
-        if (Selection is { } sel && sel.b - sel.a > 0.05)
+        if (Selection is { } range && range.b - range.a > 0.05)
         {
-            var (sa, sb) = sel;
+            var (sa, sb) = range;
             using var sel = new SolidBrush(Color.FromArgb(46, 255, 255, 255));
             using var edge = new SolidBrush(Color.FromArgb(180, 255, 255, 255));
             g.FillRectangle(sel, XAt(sa), 0, XAt(sb) - XAt(sa), Height);
