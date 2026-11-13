@@ -168,6 +168,20 @@ final class HotKey {
     }
 }
 
+/// shorten a menu title with "…" in the middle so the menu stays as wide as the level panel
+/// (a long note name made the menu wider and left an empty area next to the panel)
+func fitMenuTitle(_ title: String, room: CGFloat) -> String {
+    let font = NSFont.menuFont(ofSize: 0)
+    func width(_ s: String) -> CGFloat { (s as NSString).size(withAttributes: [.font: font]).width }
+    guard width(title) > room else { return title }
+    var chars = Array(title)
+    while chars.count > 8 && width(String(chars)) > room {
+        chars.remove(at: chars.count / 2)                      // keep the start and the end
+    }
+    let mid = chars.count / 2
+    return String(chars[..<mid]).trimmingCharacters(in: .whitespaces) + "…" + String(chars[mid...]).trimmingCharacters(in: .whitespaces)
+}
+
 // MARK: - config.json, read again only when the file changes (it is polled by the timers)
 
 final class Config {
@@ -636,13 +650,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         menu.addItem(mi)
         menu.addItem(.separator())
         func add(_ title: String, _ action: Selector?, key: String = "", enabled: Bool = true) -> NSMenuItem {
-            let i = NSMenuItem(title: title, action: action, keyEquivalent: key)
+            let i = NSMenuItem(title: fitMenuTitle(title, room: key.isEmpty ? 286 : 230), action: action, keyEquivalent: key)
+            if i.title != title { i.toolTip = title }
             i.target = self; i.isEnabled = enabled && action != nil
             menu.addItem(i); return i
         }
         if let c = cur {
-            let t = c.title.map { " – \($0)" } ?? ""
-            _ = add(c.alive ? T("recording_for") + elapsed(c.start) + t : T("the_recorder_stopped_stop_to_save"), nil)
+            // the timer always stays whole: only the meeting title is shortened
+            let head = T("recording_for") + elapsed(c.start)
+            let headW = (head as NSString).size(withAttributes: [.font: NSFont.menuFont(ofSize: 0)]).width
+            let dashW = (" – " as NSString).size(withAttributes: [.font: NSFont.menuFont(ofSize: 0)]).width
+            let t = c.title.map { " – " + fitMenuTitle($0, room: 286 - headW - dashW - 6) } ?? ""
+            _ = add(c.alive ? head + t : T("the_recorder_stopped_stop_to_save"), nil)
             let sp = add(T("stop_and_process"), #selector(stopAndProcess), key: "r")
             sp.keyEquivalentModifierMask = [.command, .option, .control]
             _ = add(T("stop_without_processing"), #selector(stopOnly))
@@ -656,7 +675,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         }
         menu.addItem(.separator())
         if let n = lastNote {
-            _ = add(T("open_last_note") + (n as NSString).lastPathComponent, #selector(openLastNote))
+            // shorten only the note name, after its date, so "Open last note: 2026-11-12 - …" stays readable
+            let prefix = T("open_last_note"), name = (n as NSString).lastPathComponent
+            let room = 286 - (prefix as NSString).size(withAttributes: [.font: NSFont.menuFont(ofSize: 0)]).width
+            var short = name
+            if (name as NSString).size(withAttributes: [.font: NSFont.menuFont(ofSize: 0)]).width > room, name.count > 13 {
+                let date = String(name.prefix(13))                                   // "2026-11-12 - "
+                short = date + fitMenuTitle(String(name.dropFirst(13)), room: room - (date as NSString).size(withAttributes: [.font: NSFont.menuFont(ofSize: 0)]).width)
+            }
+            let ln = add(prefix + short, #selector(openLastNote))
+            ln.toolTip = name
         }
         _ = add(T("import_audio_file"), processing ? nil : #selector(importAudio), key: "i")
         _ = add(T("open_recordings_folder"), #selector(openRecordings))
@@ -1237,13 +1265,19 @@ func renderDocs(_ dir: String, _ d: AppDelegate) {
         let items = menu.items.filter { $0.view == nil }          // the level panel is drawn below
         let rowH: CGFloat = 24, sepH: CGFloat = 11, pad: CGFloat = 6
         let lv2 = LevelView()
-        lv2.micName = lv.micName; lv2.history = lv.history; lv2.mic = lv.mic
+        lv2.micName = lv.micName
+        // idle: no live levels (they start only while recording), the Test mic button instead
+        lv2.history = recording ? lv.history : []
+        lv2.mic = recording ? lv.mic : (-120, -120)
+        lv2.note = recording ? "" : T("preview_hint")
+        lv2.testButton.title = T("test_mic")
+        lv2.testButton.isHidden = recording
         lv2.sys = recording ? lv.sys : nil
         lv2.recording = recording
         lv2.setVolume(0.62); lv2.agcBox.state = .on; lv2.agcBox.title = lv.agcBox.title
         lv2.setMuted(false, unsupported: false)
         let itemsH = items.reduce(CGFloat(0)) { $0 + ($1.isSeparatorItem ? sepH : rowH) }
-        let menuView = FlippedView(frame: NSRect(x: 0, y: 0, width: lv2.frame.width + 40, height: lv2.frame.height + itemsH + pad * 2))
+        let menuView = FlippedView(frame: NSRect(x: 0, y: 0, width: lv2.frame.width, height: lv2.frame.height + itemsH + pad * 2))
         menuView.appearance = dark
         menuView.wantsLayer = true
         menuView.layer?.backgroundColor = NSColor(white: 0.16, alpha: 1).cgColor
@@ -1262,7 +1296,11 @@ func renderDocs(_ dir: String, _ d: AppDelegate) {
             }
             let enabled = it.action != nil && it.isEnabled || it.submenu != nil
             var key = ""
-            if it.submenu != nil { key = "›" } else if !it.keyEquivalent.isEmpty { key = "⌘" + it.keyEquivalent.uppercased() }
+            if it.submenu != nil { key = "›" } else if !it.keyEquivalent.isEmpty {
+                let m = it.keyEquivalentModifierMask
+                key = (m.contains(.control) ? "⌃" : "") + (m.contains(.option) ? "⌥" : "") + (m.contains(.shift) ? "⇧" : "")
+                    + (m.contains(.command) ? "⌘" : "") + it.keyEquivalent.uppercased()
+            }
             let t = NSTextField(labelWithString: (it.state == .on ? "✓ " : "") + it.title)
             t.font = font; t.textColor = enabled ? .labelColor : .tertiaryLabelColor
             t.lineBreakMode = .byTruncatingTail

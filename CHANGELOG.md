@@ -4,6 +4,12 @@ Versions follow [Semantic Versioning](https://semver.org/): MAJOR.MINOR.PATCH.
 MAJOR for changes that break existing use (config, CLI, notes), MINOR for new features,
 PATCH for fixes. Every release has a git tag `vX.Y.Z` (`make tag`).
 
+## 1.3.1 – 2026-11-13
+
+- Menu: long titles (e.g. the last note name) are shortened with "…" in the middle, so the menu is
+  as wide as the level panel and has no empty area; the full title is in the tooltip.
+- Level panel: Test mic has its own row, no longer touching the meters.
+
 ## 1.3.0 – 2026-11-13
 
 - Fix: the menu could take seconds (up to a minute with repeated clicks) to open, because the mic
