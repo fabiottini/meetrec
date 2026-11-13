@@ -4,6 +4,14 @@ Versions follow [Semantic Versioning](https://semver.org/): MAJOR.MINOR.PATCH.
 MAJOR for changes that break existing use (config, CLI, notes), MINOR for new features,
 PATCH for fixes. Every release has a git tag `vX.Y.Z` (`make tag`).
 
+## 1.3.0 – 2026-11-13
+
+- Fix: the menu could take seconds (up to a minute with repeated clicks) to open, because the mic
+  preview started by itself on the main thread (3 s with a Bluetooth headset). The menu now opens at
+  once; the preview starts only with **Test mic**, in the background.
+- Global shortcut **⌃⌥⌘R**: start a recording from any app, or stop and process it.
+- The log (menu > Log) says which app uses the microphone and why the call prompt was shown or not.
+
 ## 1.2.0 – 2026-11-09
 
 - Open source (MIT). README: personal project without support, privacy, recording consent,
