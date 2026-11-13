@@ -14,6 +14,12 @@ import textwrap
 import time
 from pathlib import Path
 
+for _s in (sys.stdout, sys.stderr):                    # Windows console: cp1252 cannot print → or …
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 ROOT = Path(__file__).resolve().parent.parent
 MEET = ROOT / "meet.py"
 failures = []
