@@ -4,6 +4,17 @@ Versions follow [Semantic Versioning](https://semver.org/): MAJOR.MINOR.PATCH.
 MAJOR for changes that break existing use (config, CLI, notes), MINOR for new features,
 PATCH for fixes. Every release has a git tag `vX.Y.Z` (`make tag`).
 
+## 1.4.0 – 2026-11-13
+
+- **Instructions for Claude** when you stop a recording (e.g. "remove the part where I talk to people
+  at the door"): Claude points at the sentences to remove, MeetRec removes them from the transcript
+  and from the saved audio and writes in the note what was removed and why. Claude never rewrites the
+  transcript; a request that would remove more than half of the recording is not applied. The
+  instructions also guide the summary. `meet process --instructions`.
+- **Audio editor** before the transcription: waveform of the whole recording, select by dragging,
+  listen, cut (several times, with zoom), then apply and transcribe. Also **Edit audio…** on
+  recordings to process. `meet cut`, `meet prepare`, `meet peaks`.
+
 ## 1.3.2 – 2026-11-13
 
 - Fix: long menu titles were shortened twice (the last note lost its date: "202…61-12"). The

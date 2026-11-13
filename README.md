@@ -94,6 +94,18 @@ meeting it was.
 
 <p align="center"><img src="docs/tour-which-meeting.png" width="460" alt="Which meeting was it? Events from two calendars"></p>
 
+In the same dialog you can give **instructions to Claude**, e.g. *"remove the part where I talk to
+people at the door"*: Claude only points at the sentences to remove (it never rewrites the
+transcript), MeetRec removes them from the transcript and from the saved audio, and the note says what
+was removed and why. A request that would remove more than half of the recording is not applied. The
+instructions also guide the summary.
+
+Or tick **Review and cut the audio before transcribing**: an editor shows the whole recording, you
+select parts by dragging, listen to them and cut them; the cuts are applied to every track, then the
+transcription starts. Recordings in **To process** have **Edit audio…** too.
+
+<p align="center"><img src="docs/tour-editor.png" width="760" alt="Audio editor: waveform, a cut in red, a selection, play and cut buttons"></p>
+
 **4. Not in any calendar?** "Something else: I'll write it…" asks for title, day, time, attendees and
 agenda.
 
@@ -342,6 +354,8 @@ meet start [-t "title"]   # record in the background
 meet status
 meet stop                 # stop, transcribe, find the event, write the note
 meet stop --discard       # stop and delete the recording
+meet process <folder> --instructions "remove the part at the door"
+meet cut <folder> 10:32-12:05,1:00:10-1:02:00   # cut parts of the audio before transcribing
 meet start --mic-only | --with-system  [--transcript separate|mixed] [--voice-profile p1..p4] [--voice-scope mine|all]
 meet verify <folder>      # check note + transcript of a processed recording
 meet drop-audio <folder>  # delete its audio (only if verify is OK)
