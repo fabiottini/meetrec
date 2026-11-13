@@ -77,7 +77,7 @@ func T(_ key: String, _ args: [String: String] = [:]) -> String {
 // MARK: - process helper
 
 @discardableResult
-func runMeet(_ args: [String], onLine: ((String) -> Void)? = nil,
+func runMeet(_ args: [String], input: String? = nil, onLine: ((String) -> Void)? = nil,
              completion: @escaping (Int32, String) -> Void) -> Process {
     let p = Process()
     var env = ProcessInfo.processInfo.environment
@@ -95,7 +95,8 @@ func runMeet(_ args: [String], onLine: ((String) -> Void)? = nil,
     let pipe = Pipe()
     p.standardOutput = pipe
     p.standardError = pipe
-    p.standardInput = FileHandle.nullDevice
+    let inPipe = input.map { _ in Pipe() }      // secrets (API keys) go through stdin, never in the arguments
+    p.standardInput = inPipe ?? FileHandle.nullDevice
     var output = ""
     var partial = ""
     let lock = NSLock()
@@ -121,7 +122,13 @@ func runMeet(_ args: [String], onLine: ((String) -> Void)? = nil,
         lock.unlock()
         DispatchQueue.main.async { completion(proc.terminationStatus, out) }
     }
-    do { try p.run() } catch { completion(-1, "cannot run \(meetBin): \(error)") }
+    do {
+        try p.run()
+        if let inPipe, let input {
+            inPipe.fileHandleForWriting.write(Data((input + "\n").utf8))
+            try? inPipe.fileHandleForWriting.close()
+        }
+    } catch { completion(-1, "cannot run \(meetBin): \(error)") }
     return p
 }
 
@@ -203,6 +210,13 @@ final class Config {
     }
 }
 
+// MARK: - AI providers for the summary and the instructions (meet.py does the work)
+
+let aiProviders: [(String, String)] = [("claude-code", "ai_p_claude_code"), ("codex", "ai_p_codex"),
+                                       ("anthropic", "ai_p_anthropic"), ("openai", "ai_p_openai"),
+                                       ("openai-compatible", "ai_p_compatible"), ("command", "ai_p_command"),
+                                       ("none", "ai_p_none")]
+
 // MARK: - voice profiles (filters are in meet.py)
 
 let voiceProfiles: [(String, String)] = [("none", "voice_none"), ("p1", "voice_p1"), ("p2", "voice_p2"),
@@ -238,6 +252,14 @@ final class Settings: ObservableObject {
     @Published var voiceProfile = "none"
     @Published var voiceScope = "mine"
     @Published var afterAudio = "ask"
+    // AI for the summary and the instructions
+    @Published var aiProvider = "claude-code"
+    @Published var aiModel = ""
+    @Published var aiBaseURL = ""
+    @Published var aiCommand = ""
+    @Published var aiKeyInput = ""
+    @Published var aiStatus = ""
+    @Published var aiKeys: [String: Bool] = [:]
     @Published var mics: [(name: String, id: String)] = []
     @Published var account = "…"
     @Published var loginMessage = ""
@@ -267,6 +289,12 @@ final class Settings: ObservableObject {
         voiceProfile = raw["voice_profile"] as? String ?? "none"
         voiceScope = raw["voice_profile_scope"] as? String ?? "mine"
         afterAudio = raw["after_process_audio"] as? String ?? "ask"
+        aiProvider = raw["ai_provider"] as? String ?? "claude-code"
+        aiModel = raw["ai_model"] as? String ?? ""
+        aiBaseURL = raw["ai_base_url"] as? String ?? ""
+        aiCommand = (raw["summary_cmd"] as? String) ?? (raw["summary_cmd"] as? [String])?.joined(separator: " ") ?? ""
+        aiKeyInput = ""
+        refreshAI()
         launchAtLogin = SMAppService.mainApp.status == .enabled
         saved = false
         loadMics()
@@ -305,10 +333,54 @@ final class Settings: ObservableObject {
         raw["voice_profile"] = voiceProfile
         raw["voice_profile_scope"] = voiceScope
         raw["after_process_audio"] = afterAudio
+        raw["ai_provider"] = aiProvider
+        raw["ai_model"] = aiModel.trimmingCharacters(in: .whitespaces)
+        raw["ai_base_url"] = aiBaseURL.trimmingCharacters(in: .whitespaces)
+        if aiProvider == "command" { raw["summary_cmd"] = aiCommand.trimmingCharacters(in: .whitespaces) }
         if let d = try? JSONSerialization.data(withJSONObject: raw, options: [.prettyPrinted, .sortedKeys]) {
             try? FileManager.default.createDirectory(atPath: "\(home)/.config/meetrec", withIntermediateDirectories: true)
             try? d.write(to: URL(fileURLWithPath: configFile), options: .atomic)
             saved = true
+        }
+    }
+
+    var aiNeedsKey: Bool { ["anthropic", "openai", "openai-compatible"].contains(aiProvider) }
+    var aiModelHint: String {
+        switch aiProvider {
+        case "claude-code": return T("ai_model_default", ["m": "sonnet"])
+        case "anthropic": return T("ai_model_default", ["m": "claude-opus-5-5"])
+        case "codex": return T("ai_model_default", ["m": "Codex"])
+        default: return T("ai_model_required")
+        }
+    }
+
+    func refreshAI() {
+        runMeet(["ai", "--json"]) { _, out in
+            let j = out.split(separator: "\n").last.flatMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) } as? [String: Any]
+            self.aiKeys = j?["keys"] as? [String: Bool] ?? [:]
+        }
+    }
+
+    /// save first (the test and the key use the saved provider), then run
+    func saveAIKey() {
+        let k = aiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !k.isEmpty else { return }
+        aiKeyInput = ""
+        runMeet(["ai", "key", aiProvider], input: k) { _, out in
+            self.aiStatus = out.split(separator: "\n").last.map { $0.replacingOccurrences(of: "[meet] ", with: "") } ?? ""
+            self.refreshAI()
+        }
+    }
+
+    func removeAIKey() {
+        runMeet(["ai", "key", aiProvider, "--delete"]) { _, _ in self.aiStatus = T("ai_key_removed"); self.refreshAI() }
+    }
+
+    func testAI() {
+        save()
+        aiStatus = T("ai_testing")
+        runMeet(["ai", "test"]) { _, out in
+            self.aiStatus = out.split(separator: "\n").last.map { $0.replacingOccurrences(of: "[meet] ", with: "") } ?? ""
         }
     }
 
@@ -394,7 +466,33 @@ struct SettingsView: View {
                 TextField(T("meetings_folder_relative_to_vault"), text: $s.meetingsDir)
                 TextField(T("people_folder_relative_to_vault"), text: $s.peopleDir)
                 TextField(T("frontmatter_context"), text: $s.context)
-                Toggle(T("automatic_summary_with_claude_text_only"), isOn: $s.summary)
+            }
+            Section(T("ai_section")) {
+                Toggle(T("ai_summary_toggle"), isOn: $s.summary)
+                Picker(T("ai_provider"), selection: $s.aiProvider) {
+                    ForEach(aiProviders, id: \.0) { p in Text(T(p.1)).tag(p.0) }
+                }
+                if s.aiProvider == "command" {
+                    TextField(T("ai_command"), text: $s.aiCommand, prompt: Text("ollama run llama3"))
+                } else if s.aiProvider != "none" {
+                    TextField(T("ai_model"), text: $s.aiModel, prompt: Text(s.aiModelHint))
+                }
+                if s.aiProvider == "openai-compatible" {
+                    TextField(T("ai_base_url"), text: $s.aiBaseURL, prompt: Text("http://localhost:11434/v1"))
+                }
+                if s.aiNeedsKey {
+                    HStack {
+                        SecureField(T("ai_api_key"), text: $s.aiKeyInput,
+                                    prompt: Text(s.aiKeys[s.aiProvider] == true ? T("ai_key_saved") : T("ai_key_none")))
+                        Button(T("ai_key_save")) { s.save(); s.saveAIKey() }.disabled(s.aiKeyInput.isEmpty)
+                        if s.aiKeys[s.aiProvider] == true { Button(T("ai_key_remove")) { s.removeAIKey() } }
+                    }
+                }
+                HStack {
+                    Button(T("ai_test")) { s.testAI() }.disabled(s.aiProvider == "none")
+                    Text(s.aiStatus).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                }
+                Text(T("ai_privacy_note")).font(.caption).foregroundStyle(.secondary)
             }
             Section(T("cal_title")) {
                 Text(s.account.isEmpty ? T("cal_none") : s.account).textSelection(.enabled)
@@ -1479,7 +1577,7 @@ func renderDocs(_ dir: String, _ d: AppDelegate) {
               ok: false, required: true, action: T("setup_allow")),
         Check(id: "vault", title: T("setup_vault"), detail: "/Users/you/Obsidian/Notes", ok: true, required: true, action: T("setup_choose")),
         Check(id: "calendars", title: T("cal_title"), detail: T("cal_count", ["n": "2"]), ok: true, required: false, action: nil),
-        Check(id: "claude", title: T("setup_claude"), detail: "/Users/you/.local/bin/claude", ok: true, required: false, action: nil),
+        Check(id: "ai", title: T("setup_ai"), detail: T("ai_p_claude_code") + " · sonnet", ok: true, required: false, action: nil),
         Check(id: "cli", title: T("setup_cli"), detail: T("setup_cli_detail"), ok: false, required: false, action: T("setup_install")),
     ]
     sm.accounts = [CalAccount(id: "microsoft-1", provider: "microsoft", label: "you@company.com", ok: true),

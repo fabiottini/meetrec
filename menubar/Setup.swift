@@ -78,6 +78,7 @@ final class SetupModel: NSObject, ObservableObject, URLSessionDownloadDelegate {
     @Published var accounts: [CalAccount] = []
     @Published var googleClient = false
     @Published var msClient = false
+    @Published var ai: [String: Any] = [:]
     @Published var loginMessage = ""
     @Published var loginRunning = false
     @Published var loginURL = ""
@@ -88,6 +89,10 @@ final class SetupModel: NSObject, ObservableObject, URLSessionDownloadDelegate {
     var requiredMissing: Bool { checks.contains { $0.required && !$0.ok } }
 
     func refresh(_ done: (() -> Void)? = nil) {
+        runMeet(["ai", "--json"]) { _, out in
+            self.ai = out.split(separator: "\n").last.flatMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) } as? [String: Any] ?? [:]
+            self.build()
+        }
         runMeet(["accounts", "--json"]) { _, out in
             let j = out.split(separator: "\n").last.flatMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) } as? [String: Any]
             self.accounts = (j?["accounts"] as? [[String: Any]] ?? []).map {
@@ -223,11 +228,20 @@ final class SetupModel: NSObject, ObservableObject, URLSessionDownloadDelegate {
             Check(id: "calendars", title: T("cal_title"),
                   detail: accounts.isEmpty ? T("cal_none") : T("cal_count", ["n": "\(accounts.count)"]),
                   ok: !accounts.isEmpty && accounts.allSatisfy(\.ok), required: false, action: nil),
-            Check(id: "claude", title: T("setup_claude"), detail: findTool("claude") ?? (FileManager.default.isExecutableFile(atPath: "\(home)/.local/bin/claude") ? "\(home)/.local/bin/claude" : T("setup_claude_detail")),
-                  ok: findTool("claude") != nil || FileManager.default.isExecutableFile(atPath: "\(home)/.local/bin/claude"), required: false, action: nil),
+            aiCheck(),
             Check(id: "cli", title: T("setup_cli"), detail: cliOK ? cliPath : T("setup_cli_detail"),
                   ok: cliOK, required: false, action: cliOK ? nil : T("setup_install")),
         ]
+    }
+
+    /// the AI provider chosen in Settings: ready or why not (optional: without it notes have only the transcript)
+    private func aiCheck() -> Check {
+        let provider = ai["provider"] as? String ?? "claude-code"
+        let model = ai["model"] as? String ?? ""
+        let ready = ai["ready"] as? Bool ?? false
+        let name = T(aiProviders.first { $0.0 == provider }?.1 ?? provider) + (model.isEmpty || provider == "command" ? "" : " · \(model)")
+        return Check(id: "ai", title: T("setup_ai"), detail: ready ? name : name + ": " + (ai["why"] as? String ?? "…"),
+                     ok: ready, required: false, action: nil)
     }
 
     func run(_ id: String) {

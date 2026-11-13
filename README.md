@@ -23,7 +23,9 @@ There are two ways to use it, and they share the same state:
 **Before you start**
 - [Obsidian](https://obsidian.md) (free): create a vault, that is any folder. Meeting notes go there.
 - About **2 GB free** for the speech model.
-- Optional: [Claude Code](https://claude.com/claude-code), for the summary. Without it the note has only the transcript.
+- Optional, for the summary: an AI of your choice (Settings > **AI**): Claude Code or Codex already
+  on the computer, an API key (Claude, OpenAI), or a local model (Ollama, LM Studio). Without it the
+  note has only the transcript.
 
 **Windows 10/11 (64-bit, beta)**
 1. Download [`MeetRec-windows.zip`](https://github.com/fabiottini/meetrec/releases/latest/download/MeetRec-windows.zip).
@@ -79,8 +81,9 @@ to disk while you record, so a crash does not lose it.
 - **Who is speaking**: your words and the others' words are kept apart, thanks to the two tracks.
 - **Every calendar you use**: Microsoft 365 and Outlook.com, Google, and anything in the macOS
   Calendar app, with as many accounts as you want. When you stop, MeetRec asks which meeting it was.
-- **Summary** with Claude, optional and text only: key points, decisions, action items, open
-  questions.
+- **Summary** with the AI you choose, optional and text only: key points, decisions, action items,
+  open questions. Claude Code, Codex, Claude API, OpenAI API, any OpenAI-compatible service (also a
+  local model) or your own command; or off. See [AI for the summary](#ai-for-the-summary).
 - **Obsidian note** with frontmatter, linked people and a timestamped transcript.
 
 ## Fast and offline
@@ -92,7 +95,7 @@ audio never leaves it, and there is no account or cloud service behind MeetRec.
 |---|---|
 | Setup | once: Homebrew packages and the 1.6 GB model |
 | Calendars (optional) | to read the event of the meeting |
-| Summary (optional) | the transcript **text** goes to Claude; turn it off to stay fully offline |
+| Summary (optional) | the transcript **text** goes to the AI you choose; a local model or off keeps everything offline |
 
 Measured on a MacBook Pro M3 (16 GB) with a real 11 min 15 s call, two tracks:
 
@@ -105,7 +108,7 @@ Measured on a MacBook Pro M3 (16 GB) with a real 11 min 15 s call, two tracks:
 
 The silence filter skips the pauses, which is what makes it fast: the same call took 156 s of
 transcription with Vibe's engine. Converting the raw audio when you stop adds a few seconds; the
-optional summary with Claude adds about 40 s and needs internet.
+optional summary with Claude Code adds about 40 s and needs internet (a local model does not).
 
 ## A meeting, step by step
 
@@ -262,7 +265,7 @@ The prebuilt Mac app (Apple Silicon and Intel, macOS 15 or later) is attached to
 | Microphone and system audio permissions | asks macOS (for system audio, reopen the app afterwards) |
 | Obsidian vault | choose the folder |
 | Calendars (optional) | add Microsoft, Google and macOS Calendar accounts, see [Calendars](#calendars) |
-| Claude Code (optional) | needed for the summary; without it the note has only the transcript |
+| AI for the summary (optional) | shows the provider chosen in Settings > AI and whether it is ready |
 | `meet` command (optional) | installs `~/.local/bin/meet`, which uses the app |
 
 Setup opens again by itself while something required is missing. After that it is in the menu,
@@ -297,7 +300,7 @@ please [open an issue](https://github.com/fabiottini/meetrec/issues) if somethin
 | Microphone permission | opens Settings > Privacy & security > Microphone when desktop apps are blocked |
 | Obsidian vault | choose the folder |
 | Calendars (optional) | Microsoft and Google accounts, same guides as on the Mac |
-| Claude Code (optional) | needed for the summary |
+| AI for the summary (optional) | shows the provider chosen in Settings > AI and whether it is ready |
 | `meet` command (optional) | adds the MeetRec folder to your PATH: `meet.cmd` works in any new terminal |
 
 <p align="center">
@@ -465,6 +468,9 @@ meet events [YYYY-MM-DD]                       # events of a day from every acco
 meet candidates <folder> / meet choose <folder> <n|none>
 meet choose <folder> manual --title "…" [--start ISO --end ISO --people "a, b" --agenda "…"]
 meet mics                 # available microphones
+meet ai                   # AI provider for the summary: status
+meet ai key anthropic     # store an API key (reads it from stdin or asks for it); --delete to remove
+meet ai test              # send a one-word prompt to the chosen provider
 ```
 
 ## Calendars
@@ -533,7 +539,7 @@ microphone: 16 kHz, narrow band, often very quiet. Whisper makes many more mista
 4. **Calendar**. Events of every account that overlap the recording (or start within 10 minutes
    of it); you pick one when you stop. If you do not pick (`meet process` alone), it takes the
    event that overlaps the most.
-5. **Summary** (optional). `claude -p` receives **only the text** of the transcript.
+5. **Summary** (optional). The AI you chose receives **only the text** of the transcript.
 6. **Note**. `<vault>/<meetings_dir>/YYYY-MM/YYYY-MM-DD - <title>.md` with frontmatter
    (`type: meeting`, `context`, `summary`, `people`, `date`, times, links to the recording and
    to the event). Attendees with a `firstname_lastname.md` note in `people_dir` are linked.
@@ -556,8 +562,11 @@ microphone: 16 kHz, narrow band, often very quiet. Whisper makes many more mista
 | `me` / `others_label` | `Me` / `Altri` | labels of the two tracks |
 | `mic_id` | `null` | `null` = system microphone; IDs from `meet mics` |
 | `auto_gain` | `true` | lowers the microphone volume when it clips |
-| `summary` | `true` | |
-| `summary_cmd` | `["claude","-p","--model","sonnet"]` | the prompt is sent on stdin |
+| `summary` | `true` | automatic summary on/off |
+| `ai_provider` | `claude-code` | `claude-code`, `codex`, `anthropic`, `openai`, `openai-compatible`, `command`, `none`: see [AI for the summary](#ai-for-the-summary) |
+| `ai_model` | `""` | empty = provider default (`sonnet` for Claude Code, `claude-opus-5-5` for the Claude API); required for OpenAI and compatible services |
+| `ai_base_url` | `""` | `openai-compatible`: the service URL ending in `/v1` (e.g. `http://localhost:11434/v1` for Ollama) |
+| `summary_cmd` | `["claude","-p","--model","sonnet"]` | `command` provider: your program (list or text), prompt on stdin, answer on stdout |
 | `keep_raw` | `false` | also keeps the raw PCM |
 | `record_system` | `true` | `false`: record only my voice |
 | `transcript_mode` | `separate` | `separate` (you / others) or `mixed` (one transcript from the mix) |
@@ -604,11 +613,34 @@ To ship it with the app, add it to `locales/` and run `./install.sh`.
 
 - Audio, transcription, calendar data and notes stay on your Mac. Calendar logins talk only to
   Microsoft and Google; tokens are in `~/.config/meetrec/tokens/` (mode 0600).
-- With **Automatic summary** on, the **text** of the transcript is sent to Claude through your Claude
-  Code (`summary_cmd`). Turn it off, or point `summary_cmd` to a local model, to keep everything
-  offline. The transcript is untrusted text (anyone in the call speaks into it), so Claude Code runs
-  with **no tools, no MCP servers, no skills and no saved session** (`--tools "" --strict-mcp-config
-  --disable-slash-commands --no-session-persistence`): it can only write the answer.
+- With **Automatic summary** on, the **text** of the transcript is sent to the AI you chose in
+  Settings > AI, and only there. Choose **Off** or a local model to keep everything offline.
+- The transcript is untrusted text (anyone in the call speaks into it), so the prompt tells the AI
+  to ignore instructions inside it, and the local agents cannot act: Claude Code runs with **no
+  tools, no MCP servers, no skills and no saved session** (`--tools "" --strict-mcp-config
+  --disable-slash-commands --no-session-persistence`); Codex runs with a **read-only sandbox** in an
+  empty temporary folder, without your config, rules or saved session (Codex cannot turn its shell
+  off: for the strictest setup use an API provider, which has no tools at all).
+
+## AI for the summary
+
+Settings > **AI** (or `config.json`): the same choice on macOS and Windows, used for the summary and
+for the instructions ("remove the part where…").
+
+| Provider | What you need | Notes |
+|---|---|---|
+| Claude Code on this computer | [Claude Code](https://claude.com/claude-code) logged in | default; model `sonnet` unless you set one |
+| Codex on this computer | [Codex CLI](https://github.com/openai/codex) logged in | read-only sandbox, empty folder |
+| Claude API | an API key from the Claude Console | default model `claude-opus-5-5`; on a refusal the API retries on a suitable model (`fallbacks: "default"`) |
+| OpenAI API | an API key and a model name | Chat Completions |
+| OpenAI-compatible service | the URL (`…/v1`), a model, a key if the service wants one | Ollama, LM Studio (local, offline), OpenRouter, Mistral, Gemini's OpenAI endpoint… |
+| My own command | any program: prompt on stdin, answer on stdout | e.g. `ollama run llama3` |
+| Off | nothing | notes have only the transcript |
+
+API keys are typed in Settings (or `meet ai key <provider>`, which reads the key from stdin or
+asks for it without showing it) and stored in the MeetRec config folder, `tokens/ai-<provider>.key`,
+readable only by you; `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` work too. **Test** in Settings (or
+`meet ai test`) sends a one-word prompt; `meet ai` shows the status.
 
 ## Security
 
@@ -634,7 +666,7 @@ MeetRec does not bundle them; the Setup installs or downloads them:
 [whisper large-v3-turbo](https://huggingface.co/ggerganov/whisper.cpp) model,
 [Silero VAD](https://github.com/snakers4/silero-vad) (MIT) through the ggml-org whisper-vad files,
 [FFmpeg](https://ffmpeg.org) (LGPL/GPL, from Homebrew),
-[Claude Code](https://claude.com/claude-code) for the optional summary (your own account).
+the AI you choose for the optional summary (your own account or key).
 [Vibe](https://github.com/thewh1teagle/vibe) is supported as a fallback transcriber.
 
 ## Known limits

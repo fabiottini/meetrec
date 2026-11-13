@@ -39,6 +39,7 @@ sealed class SetupForm : Form
     readonly Label status = new() { AutoSize = true, Margin = new Padding(0, 8, 10, 0) };
     readonly List<Button> actionButtons = new();
     List<JsonObject> accounts = new();
+    JsonObject ai = new();
     bool googleClient, msClient;
     System.Diagnostics.Process? loginProc;
     bool loginCancelled;
@@ -150,12 +151,6 @@ sealed class SetupForm : Form
         return true;
     }
 
-    static string? Claude()
-    {
-        var local = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "bin", "claude.exe");
-        return Paths.Which("claude.exe") ?? Paths.Which("claude.cmd") ?? (File.Exists(local) ? local : null);
-    }
-
     static bool CliOnPath()
     {
         using var k = Registry.CurrentUser.OpenSubKey("Environment");
@@ -172,7 +167,7 @@ sealed class SetupForm : Form
         var model = ModelPath(Models[0].file);
         bool models = model != null && ModelPath(Models[1].file) != null;
         bool mic = MicAllowed();
-        var claude = Claude();
+
         bool cli = CliOnPath();
         return new()
         {
@@ -184,7 +179,7 @@ sealed class SetupForm : Form
             new("vault", T("setup_vault"), vault.Length == 0 ? T("setup_vault_missing") : vault, vault.Length > 0 && Directory.Exists(vault), true, T("setup_choose")),
             new("calendars", T("cal_title"), accounts.Count == 0 ? T("cal_none") : T("cal_count", ("n", accounts.Count.ToString())),
                 accounts.Count > 0 && accounts.All(a => a["ok"]?.GetValue<bool>() == true), false, null),
-            new("claude", T("setup_claude"), claude ?? T("setup_claude_detail"), claude != null, false, null),
+            AiCheck(),
             new("cli", T("setup_win_cli"), cli ? Paths.AppDir : T("setup_win_cli_detail"), cli, false, cli ? null : T("setup_install")),
         };
     }
@@ -245,8 +240,24 @@ sealed class SetupForm : Form
         }
     }
 
+    /// the AI provider chosen in Settings: ready or why not (optional)
+    CheckItem AiCheck()
+    {
+        var provider = ai["provider"]?.GetValue<string>() ?? "claude-code";
+        var model = ai["model"]?.GetValue<string>() ?? "";
+        bool ready = ai["ready"]?.GetValue<bool>() ?? false;
+        var key = Program.AiProviders.FirstOrDefault(p => p.tag == provider).key ?? provider;
+        var name = T(key) + (model.Length == 0 || provider == "command" ? "" : " · " + model);
+        return new("ai", T("setup_ai"), ready ? name : name + ": " + (ai["why"]?.GetValue<string>() ?? "…"), ready, false, null);
+    }
+
     public void Refresh_()
     {
+        Meet.Run(new[] { "ai", "--json" }, (_, out_) =>
+        {
+            if (IsDisposed) return;
+            if (Meet.LastJson(out_) is JsonObject j) { ai = j; BuildChecks(); }
+        });
         Meet.Run(new[] { "accounts", "--json" }, (_, out_) =>
         {
             if (IsDisposed) return;

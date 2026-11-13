@@ -55,7 +55,8 @@ def main():
             "whisper_bin": a.whisper, "whisper_model": a.model, "vad_model": a.vad or str(tmp / "none"),
             "calendar_accounts": []}
     (tmp / "conf.json").write_text(json.dumps(conf), encoding="utf-8")
-    env = dict(os.environ, MEETREC_CONF=str(tmp / "conf.json"), PYTHONUTF8="1")
+    # MEETREC_CONF_DIR: tokens and API keys of the test never touch your real config folder
+    env = dict(os.environ, MEETREC_CONF=str(tmp / "conf.json"), MEETREC_CONF_DIR=str(tmp / "confdir"), PYTHONUTF8="1")
 
     print("== version")
     check(meet("--version", env=env).stdout.startswith("MeetRec"), "meet --version")
@@ -109,6 +110,7 @@ def main():
     '''), encoding="utf-8")
     sys.path.insert(0, str(ROOT))
     os.environ["MEETREC_CONF"] = str(tmp / "conf.json")
+    os.environ["MEETREC_CONF_DIR"] = str(tmp / "confdir")
     import meet as m                                                   # noqa: E402
     check(m.pid_alive(os.getpid()) and not m.pid_alive(999999), "pid_alive")
     d = tmp / "fake"
@@ -124,6 +126,53 @@ def main():
         (d / "stop.request").write_text("stop")             # the macOS recorder uses SIGINT; same file test
         p.wait(timeout=5)                                    # reap it (a finished child is a zombie until then)
         check(not m.pid_alive(p.pid) and (d / "capture.done").exists(), "fake recorder stopped")
+
+    print("== AI providers (local fake API, no real calls)")
+    import http.server
+    import threading
+    seen = []
+
+    class FakeAPI(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers["content-length"])))
+            seen.append((self.path, self.headers.get("authorization") or self.headers.get("x-api-key"), body))
+            out = ({"content": [{"type": "text", "text": "OK"}], "stop_reason": "end_turn"} if self.path.endswith("/messages")
+                   else {"choices": [{"message": {"content": "OK"}}]})
+            data = json.dumps(out).encode()
+            self.send_response(200)
+            self.send_header("content-type", "application/json")
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), FakeAPI)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_port}"
+    conf_path = tmp / "conf.json"
+    base_conf = json.loads(conf_path.read_text(encoding="utf-8"))
+
+    def with_ai(**kw):
+        conf_path.write_text(json.dumps({**base_conf, **kw}), encoding="utf-8")
+
+    with_ai(ai_provider="openai-compatible", ai_base_url=url + "/v1", ai_model="llama3")
+    r = meet("ai", "test", env=env)
+    check(r.returncode == 0 and "OK" in r.stdout + r.stderr and seen and seen[-1][0] == "/v1/chat/completions",
+          "openai-compatible provider")
+    with_ai(ai_provider="anthropic", ai_base_url=url)
+    r = subprocess.run([sys.executable, str(ROOT / "meet.py"), "ai", "key", "anthropic"], input="sk-test-key-123\n",
+                       capture_output=True, text=True, encoding="utf-8", env=env)
+    check(r.returncode == 0 and "sk-test-key-123" not in r.stdout + r.stderr, "API key stored, never printed")
+    r = meet("ai", "test", env=env)
+    check(r.returncode == 0 and seen[-1][0] == "/v1/messages" and seen[-1][1] == "sk-test-key-123"
+          and "temperature" not in seen[-1][2], "anthropic provider")
+    meet("ai", "key", "anthropic", "--delete", env=env)
+    with_ai(ai_provider="none")
+    r = meet("ai", "--json", env=env)
+    check(json.loads(r.stdout.strip().splitlines()[-1])["ready"] is False, "AI off")
+    with_ai()
+    srv.shutdown()
 
     print()
     if failures:

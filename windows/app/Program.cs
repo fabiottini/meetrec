@@ -13,6 +13,10 @@ namespace MeetRec;
 
 static class Program
 {
+    public static readonly (string tag, string key)[] AiProviders =
+        { ("claude-code", "ai_p_claude_code"), ("codex", "ai_p_codex"), ("anthropic", "ai_p_anthropic"), ("openai", "ai_p_openai"),
+          ("openai-compatible", "ai_p_compatible"), ("command", "ai_p_command"), ("none", "ai_p_none") };
+
     public static readonly (string tag, string key)[] VoiceProfiles =
         { ("none", "voice_none"), ("p1", "voice_p1"), ("p2", "voice_p2"), ("p3", "voice_p3"), ("p4", "voice_p4") };
 
