@@ -282,7 +282,7 @@ the app self test, the transcription end to end), but it has not been used much 
 please [open an issue](https://github.com/fabiottini/meetrec/issues) if something does not work.
 
 1. Download [`MeetRec-windows.zip`](https://github.com/fabiottini/meetrec/releases/latest/download/MeetRec-windows.zip)
-   (about 80 MB: the app, the recorder and an embedded Python, nothing to install).
+   (about 60 MB: the app, the recorder and an embedded Python, nothing to install).
 2. Unzip it where you like, for example `%LOCALAPPDATA%\Programs\MeetRec`, and start **MeetRec.exe**.
    The app is not signed, so the first time Windows shows **Windows protected your PC**: click
    **More info > Run anyway**.
