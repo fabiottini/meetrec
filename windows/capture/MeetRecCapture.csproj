@@ -8,10 +8,18 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <InvariantGlobalization>true</InvariantGlobalization>
-    <!-- one exe next to meet.py in the Windows app -->
+    <!-- published into the same folder as MeetRec.exe: they share the .NET runtime files there.
+         A separate exe on purpose: an app that starts itself again from the user profile is reported
+         by antivirus heuristics (Avira: ...UserProfileSelfRun) -->
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
-    <PublishSingleFile>true</PublishSingleFile>
+    <PublishSingleFile>false</PublishSingleFile>
+    <ApplicationIcon>..\app\MeetRec.ico</ApplicationIcon>
+    <!-- shown in the file properties; unsigned files without them look more suspicious to antivirus heuristics -->
+    <Product>MeetRec</Product>
+    <Company>MeetRec (open source, github.com/fabiottini/meetrec)</Company>
+    <Copyright>MIT License, Fabio Lucattini</Copyright>
+    <FileDescription>MeetRec recorder (microphone and system audio)</FileDescription>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
   </PropertyGroup>
 

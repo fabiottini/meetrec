@@ -64,7 +64,7 @@ sealed class SetupForm : Form
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
         var head = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
-        head.Controls.Add(new PictureBox { Image = Icons.Glyph(44, Color.FromArgb(0xE5, 0x39, 0x35), null), Size = new Size(48, 48), SizeMode = PictureBoxSizeMode.CenterImage });
+        head.Controls.Add(new PictureBox { Image = Icons.AppBitmap(48), Size = new Size(52, 52), SizeMode = PictureBoxSizeMode.CenterImage });
         var titles = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true };
         titles.Controls.Add(new Label { Text = T("setup_title"), AutoSize = true, Font = new Font(Font.FontFamily, Font.Size + 4, FontStyle.Bold) });
         titles.Controls.Add(new Label { Text = T("setup_subtitle"), AutoSize = true, ForeColor = SystemColors.GrayText, MaximumSize = new Size(560, 0) });

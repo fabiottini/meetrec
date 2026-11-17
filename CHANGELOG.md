@@ -4,6 +4,23 @@ Versions follow [Semantic Versioning](https://semver.org/): MAJOR.MINOR.PATCH.
 MAJOR for changes that break existing use (config, CLI, notes), MINOR for new features,
 PATCH for fixes. Every release has a git tag `vX.Y.Z` (`make tag`).
 
+## 1.10.1 – 2026-11-17
+
+Windows fixes after the first test on a real PC.
+
+- **Nothing happened after a recording or an import** (no "which meeting?" window, no transcript, no
+  audio editor, the lists in the menu stayed empty): the app waited forever for the results of
+  meet.py. Fixed, and CI now runs the app's real path on Windows: import -> which meeting ->
+  transcript -> note -> keep audio.
+- **Antivirus false positive** (Avira: Drop.Win64.UserProfileSelfRun): the app was one
+  self-extracting exe that also started itself again as the recorder. Now the app and the recorder
+  are two exes in one folder with the .NET files next to them (nothing is unpacked at start, nothing
+  starts itself), with product and version information.
+- The MeetRec icon in the exe, in the windows and in the tray at rest (Windows settings showed a
+  blank file); the recording indicator is clearer at tray size.
+- The level panel no longer overlaps with Windows display scaling (125%, 150%).
+- The recording time in the open menu keeps running.
+
 ## 1.10.0 – 2026-11-17
 
 - **Choose where the settings file lives**: Settings > System > **Use another file…** or

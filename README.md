@@ -460,6 +460,13 @@ What is different from the Mac:
   icon in the taskbar).
 - Config in `%APPDATA%\MeetRec\config.json`, tools, models and state in `%LOCALAPPDATA%\MeetRec`.
 - Start at login: **Settings > Open MeetRec at login**.
+- **Antivirus**: MeetRec is not signed, so some antivirus programs may look at it with suspicion. Up
+  to 1.10.0 the Windows build was reported by Avira as `Drop.Win64.UserProfileSelfRun`: a false
+  positive caused by how it was packaged (one self-extracting exe that also started itself as the
+  recorder). From 1.10.1 the app and the recorder are separate exes in one folder and nothing is
+  unpacked at start. If your antivirus still complains, the source and the build are public: the zip
+  is built by GitHub Actions from this repository, and you can report the false positive to the
+  antivirus vendor.
 
 ### Build, install and release with make
 

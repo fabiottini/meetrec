@@ -43,12 +43,12 @@ static class Docs
         using (var g = Graphics.FromImage(strip))
         {
             g.Clear(Color.FromArgb(32, 32, 32));
-            var icons = new[] { Icons.Glyph(32, null, null, dark: true), Icons.Glyph(32, null, null, muted: true, dark: true),
+            var icons = new[] { Icons.Idle(32, false, false), Icons.Idle(32, false, true),
                                 Icons.Glyph(32, Color.FromArgb(0xE5, 0x39, 0x35), -40), Icons.Glyph(32, Color.FromArgb(0xE5, 0x39, 0x35), -12),
                                 Icons.Glyph(32, Color.FromArgb(0xF5, 0x8A, 0x00), null) };
             for (int i = 0; i < icons.Length; i++) g.DrawImage(icons[i], 4 + i * 40, 4);
             g.FillRectangle(Brushes.White, 200, 0, 40, 40);
-            g.DrawImage(Icons.Glyph(32, null, null, dark: false), 204, 4);
+            g.DrawImage(Icons.Glyph(16, Color.FromArgb(0xE5, 0x39, 0x35), -20), 212, 12);   // recording at real tray size
             strip.Save(Path.Combine(dir, "win-tray-icons.png"), ImageFormat.Png);
         }
         foreach (var (name, recording) in new[] { ("win-menu", false), ("win-menu-recording", true) })

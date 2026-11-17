@@ -2,9 +2,9 @@
 //
 //   MeetRec.exe                       the tray app (one instance)
 //   MeetRec.exe <audio file>          import that file (e.g. "Open with")
-//   MeetRec.exe --capture ...         the recorder (see windows/capture), started by meet.py
 //   MeetRec.exe --self-test           checks for CI: Python, meet.py, recorder, locales, menus, dialogs
 //   MeetRec.exe --render-docs <dir>   PNG images of the menu and dialogs, with demo data
+//   MeetRec.exe --test-flow <audio>   CI: import -> which meeting -> transcript -> note, dialogs answered by themselves
 
 using System.Text.Json.Nodes;
 using static MeetRec.L;
@@ -34,13 +34,13 @@ static class Program
     [STAThread]
     static int Main(string[] args)
     {
-        if (args.Length > 0 && args[0] == "--capture") return MeetRec.Capture.Program.Main(args[1..]);
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         I18n.Init();
         if (args.Length > 0 && args[0] == "--self-test") return SelfTest.Run();
         if (args.Length > 1 && args[0] == "--render-docs") return Docs.Render(args[1]);
+        if (args.Length > 1 && args[0] == "--test-flow") return SelfTest.Flow(args[1]);
 
         using var single = new Mutex(true, @"Local\MeetRec.TrayApp", out bool first);
         if (!first)
@@ -95,6 +95,45 @@ static class SelfTest
         if (!ok) fails++;
     }
 
+    /// the real path of the app on an audio file, with the dialogs answered by themselves:
+    /// import -> which meeting (none in the calendar: written by hand) -> transcript -> note -> keep audio
+    public static int Flow(string audio)
+    {
+        Console.SetOut(new StreamWriter(Console.OpenStandardOutput()) { AutoFlush = true });
+        Meet.Ui = new WindowsFormsSynchronizationContext();
+        SynchronizationContext.SetSynchronizationContext(Meet.Ui);
+        Alert.AutoAnswer = a =>
+        {
+            foreach (var t in a.AllControls().OfType<TextBox>())
+                if (t.Text.Length == 0 && t.PlaceholderText == T("manual_title_placeholder")) t.Text = "CI flow test";
+            return 0;
+        };
+        var app = new TrayApp(show: false) { LastNote = null };
+        int result = 1;
+        var started = DateTime.Now;
+        var t = new System.Windows.Forms.Timer { Interval = 500 };
+        t.Tick += (_, _) =>
+        {
+            if (app.LastNote != null && !app.Processing)
+            {
+                bool ok = File.Exists(app.LastNote) && File.ReadAllText(app.LastNote).Contains("00:00");
+                Console.WriteLine((ok ? "OK   " : "FAIL ") + "note written: " + app.LastNote);
+                result = ok ? 0 : 1;
+                Application.ExitThread();
+            }
+            else if ((DateTime.Now - started).TotalSeconds > 900)
+            {
+                Console.WriteLine("FAIL no note after 15 minutes (see the app log)");
+                Application.ExitThread();
+            }
+        };
+        t.Start();
+        app.ImportFile(Path.GetFullPath(audio));
+        Application.Run();
+        app.Tray.Dispose();
+        return result;
+    }
+
     public static int Run()
     {
         // a WinExe has no console of its own: run it with the output redirected (CI does)
@@ -114,7 +153,13 @@ static class SelfTest
         (code, outp) = Meet.RunSync("mics");
         Check("meet mics (recorder --list-mics)", code == 0, outp.Trim().Replace("\n", " | "));
 
+        // results of meet.py must come back (1.10 waited forever: no transcript, no dialogs on a real PC)
         Meet.Ui = null;
+        var got = new ManualResetEventSlim();
+        string? back = null;
+        Meet.Run(new[] { "--version" }, (c, o) => { back = o; got.Set(); });
+        Check("meet.py result comes back to the app", got.Wait(TimeSpan.FromSeconds(60)) && back!.StartsWith("MeetRec"), back?.Trim() ?? "timeout");
+        Check("folder after stop", Meet.DirFrom("[meet] stopped (0h00m02s) -> C:\\Users\\A B\\rec\n", "-> ") == "C:\\Users\\A B\\rec");
         var app = new TrayApp(show: false);
         app.BuildMenu();
         Check("idle menu", app.Menu.Items.Count >= 8, $"{app.Menu.Items.Count} items");
