@@ -384,6 +384,7 @@ please [open an issue](https://github.com/fabiottini/meetrec/issues) if somethin
 <img src="docs/windows/which-meeting.png" width="440" alt="Which meeting was it?">
 </p>
 <p align="center"><img src="docs/windows/editor.png" width="640" alt="Audio editor on Windows"></p>
+<p align="center"><img src="docs/windows/settings-ai.png" width="560" alt="Windows settings: AI provider and the configuration file (Show the file, Use another file)"></p>
 
 What is different from the Mac:
 
