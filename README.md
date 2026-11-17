@@ -4,8 +4,10 @@
 
 Records meetings on your Mac or Windows PC (your voice and the other participants' voices) and transcribes them
 **locally** with [whisper.cpp](https://github.com/ggml-org/whisper.cpp). It links each recording to
-the calendar event (Microsoft, Google, iCloud… as many accounts as you want) and saves a note in
-Obsidian, with an optional summary.
+the calendar event (Microsoft, Google, iCloud… as many accounts as you want) and saves the note and
+the transcript in a folder you choose, in open formats (Markdown, text, JSON, SRT and WebVTT
+subtitles), with an optional summary. The folder can be an Obsidian vault, a synced folder, or
+anything another tool reads.
 
 There are two ways to use it, and they share the same state:
 - **MeetRec**, a menu bar app on macOS, a tray app on Windows ([beta](#windows-beta));
@@ -21,7 +23,8 @@ There are two ways to use it, and they share the same state:
 ## Quick start
 
 **Before you start**
-- [Obsidian](https://obsidian.md) (free): create a vault, that is any folder. Meeting notes go there.
+- A folder for notes and transcripts (default `Documents/MeetRec`). Using [Obsidian](https://obsidian.md)?
+  Pick a folder inside your vault and choose the Obsidian Markdown style.
 - About **2 GB free** for the speech model.
 - Optional, for the summary: an AI of your choice (Settings > **AI**): Claude Code or Codex already
   on the computer, an API key (Claude, OpenAI), or a local model (Ollama, LM Studio). Without it the
@@ -33,7 +36,7 @@ There are two ways to use it, and they share the same state:
 3. If Windows says "Windows protected your PC": **More info > Run anyway** (the app is not signed).
 4. The icon appears next to the clock; if you do not see it, it is under the **^** arrow: drag it out.
 5. **Setup** opens: press **Download** on ffmpeg, whisper.cpp and the model (1.6 GB), then choose the
-   Obsidian vault folder.
+   folder for notes and transcripts.
 
 **macOS 15 or later**
 1. Install [Homebrew](https://brew.sh) (Setup copies the command for you).
@@ -41,12 +44,16 @@ There are two ways to use it, and they share the same state:
    unzip it and move MeetRec to Applications.
 3. The first time macOS blocks it: **System Settings > Privacy & Security > Open Anyway**.
 4. In **Setup** press the buttons: Python, ffmpeg, whisper.cpp, the model, the microphone and system
-   audio permissions (reopen the app after the system audio one), the Obsidian vault.
+   audio permissions (reopen the app after the system audio one), the folder for notes and transcripts.
 
 **Use it**
 - Click the icon > **Start recording**, or the shortcut: **Ctrl+Alt+Win+R** on Windows, **⌃⌥⌘R** on Mac.
 - Click the icon > **Stop and process**. MeetRec asks which meeting it was: pick a calendar event or
-  **"Something else: I'll write it"** (title, attendees). A few minutes later the note is in Obsidian.
+  **"Something else: I'll write it"** (title, attendees). A few minutes later the note is in your folder.
+
+**Command line instead of the app** (same settings file): `meet init` asks a few questions,
+`meet config` shows and changes everything, `meet config export` / `meet config import` move the
+settings to another computer. See [Configuration](#configuration).
 - Always tell the people in the call that you are recording.
 - Calendars (Microsoft, Google) are optional and need a one-time setup with the guide in Setup.
 
@@ -84,7 +91,11 @@ to disk while you record, so a crash does not lose it.
 - **Summary** with the AI you choose, optional and text only: key points, decisions, action items,
   open questions. Claude Code, Codex, Claude API, OpenAI API, any OpenAI-compatible service (also a
   local model) or your own command; or off. See [AI for the summary](#ai-for-the-summary).
-- **Obsidian note** with frontmatter, linked people and a timestamped transcript.
+- **Notes in open formats**, in the folder you choose: Markdown (plain, or Obsidian style with
+  frontmatter and links to people), plain text, JSON (for other programs), SRT and WebVTT subtitles,
+  with timestamps and speakers.
+- **One settings file**, read at startup by the app and by `meet`: copy it to another computer and
+  everything is set; `meet config` changes any setting from the command line.
 
 ## Fast and offline
 
@@ -103,7 +114,7 @@ Measured on a MacBook Pro M3 (16 GB) with a real 11 min 15 s call, two tracks:
 |---|---|
 | Transcription of your microphone | 59 s |
 | Transcription of the other participants | 36 s |
-| Note written in Obsidian | under 1 s |
+| Note written | under 1 s |
 | **Total** | **about 1 min 37 s (about 7x faster than the call)** |
 
 The silence filter skips the pauses, which is what makes it fast: the same call took 156 s of
@@ -159,8 +170,8 @@ checked, MeetRec asks whether to keep the audio.
 
 <p align="center"><img src="docs/tour-keep-audio.png" width="330" alt="Transcript done: keep or delete the audio"></p>
 
-**6. The note in Obsidian.** Frontmatter for your vault, the calendar data, a summary (optional) and
-the transcript with times and speakers. The note is written in the language of the meeting
+**6. The note.** The calendar data, a summary (optional) and the transcript with times and speakers,
+in the formats you chose. The example below is the Obsidian style (frontmatter for the vault). The note is written in the language of the meeting
 (Settings > Meeting language: English or Italian):
 
 ```markdown
@@ -263,7 +274,7 @@ The prebuilt Mac app (Apple Silicon and Intel, macOS 15 or later) is attached to
 | Python 3, ffmpeg, whisper.cpp | `brew install …`, with the log shown |
 | Transcription model | downloads whisper large-v3-turbo (1.6 GB) and the silence filter; if Vibe is installed, copies them from Vibe |
 | Microphone and system audio permissions | asks macOS (for system audio, reopen the app afterwards) |
-| Obsidian vault | choose the folder |
+| Notes and transcripts folder | choose the folder (it can be inside an Obsidian vault) |
 | Calendars (optional) | add Microsoft, Google and macOS Calendar accounts, see [Calendars](#calendars) |
 | AI for the summary (optional) | shows the provider chosen in Settings > AI and whether it is ready |
 | `meet` command (optional) | installs `~/.local/bin/meet`, which uses the app |
@@ -298,7 +309,7 @@ please [open an issue](https://github.com/fabiottini/meetrec/issues) if somethin
 | whisper.cpp | downloads the latest Windows build from the whisper.cpp releases |
 | Transcription model | downloads whisper large-v3-turbo (1.6 GB) and the silence filter |
 | Microphone permission | opens Settings > Privacy & security > Microphone when desktop apps are blocked |
-| Obsidian vault | choose the folder |
+| Notes and transcripts folder | choose the folder (it can be inside an Obsidian vault) |
 | Calendars (optional) | Microsoft and Google accounts, same guides as on the Mac |
 | AI for the summary (optional) | shows the provider chosen in Settings > AI and whether it is ready |
 | `meet` command (optional) | adds the MeetRec folder to your PATH: `meet.cmd` works in any new terminal |
@@ -378,7 +389,8 @@ permissions again.
 
 The menu has: audio levels, start (optionally with a title), stop and process, stop without
 processing, stop and discard (asks for confirmation, deletes the audio), recordings to process
-(each one can be processed or deleted), open the last note in Obsidian, recordings folder, log,
+(each one can be processed or deleted), open the last note (in Obsidian for the Obsidian style),
+recordings folder, log,
 settings, setup.
 
 ### Recording options, voice profiles, audio after the transcript
@@ -406,7 +418,7 @@ for one recording (title, what to record, transcript, voice profile).
   may still recognise how you talk. Profiles 1 and 2 only shift pitch and can be partly undone;
   3 and 4 throw information away and are harder to reverse.
 - **Audio after the transcript**: *Ask every time* (default), *Always keep*, or *Always delete*.
-  Before deleting, MeetRec checks that the note exists in the vault with its transcript section,
+  Before deleting, MeetRec checks that every note file exists with its transcript,
   that the transcript is not empty and that the saved transcription files are there; if anything is
   missing the audio is kept and you are told why. Only audio files are deleted: transcript, saved
   transcription and note stay, so `meet process` can still rebuild the note. In the note the
@@ -471,6 +483,8 @@ meet mics                 # available microphones
 meet ai                   # AI provider for the summary: status
 meet ai key anthropic     # store an API key (reads it from stdin or asks for it); --delete to remove
 meet ai test              # send a one-word prompt to the chosen provider
+meet init                 # create or update the settings, a few questions
+meet config [set|get|export|import|check|keys] ...   # every setting from the command line, see Configuration
 ```
 
 ## Calendars
@@ -540,21 +554,59 @@ microphone: 16 kHz, narrow band, often very quiet. Whisper makes many more mista
    of it); you pick one when you stop. If you do not pick (`meet process` alone), it takes the
    event that overlaps the most.
 5. **Summary** (optional). The AI you chose receives **only the text** of the transcript.
-6. **Note**. `<vault>/<meetings_dir>/YYYY-MM/YYYY-MM-DD - <title>.md` with frontmatter
-   (`type: meeting`, `context`, `summary`, `people`, `date`, times, links to the recording and
-   to the event). Attendees with a `firstname_lastname.md` note in `people_dir` are linked.
-   The note is written in the meeting language (English or Italian), the summary too.
+6. **Notes**. `<output_dir>/YYYY-MM/YYYY-MM-DD - <title>.<format>` (or without the month folder),
+   one file per format, same name:
+   - `md`: plain Markdown, or Obsidian style with frontmatter (`type: meeting`, `context`,
+     `summary`, `people`, `date`, times, links to the recording and to the event) and links to
+     attendees that have a `firstname_lastname.md` note in `<vault>/<people_dir>`;
+   - `txt`: plain text, header + summary + `[hh:mm:ss] speaker: text` lines;
+   - `json`: `{"format": "meetrec-note", "version": 1, title, date, start, end, event, summary,
+     transcript: [{start, end, speaker, text}]}`, for other programs;
+   - `srt` / `vtt`: subtitles of the recording, with the speaker.
+   Everything is written in the meeting language (English or Italian), the summary too.
 
 ## Configuration
 
-`~/.config/meetrec/config.json`, also editable from Settings. Example in
+One JSON file, read at startup by `meet`, the macOS app and the Windows app:
+
+| System | File |
+|---|---|
+| macOS | `~/.config/meetrec/config.json` |
+| Windows | `%APPDATA%\MeetRec\config.json` |
+| any | the file in `MEETREC_CONFIG_FILE`, if set (e.g. one kept in a synced folder) |
+
+**Portable**: paths can use `~` and environment variables (`$HOME`, `%USERPROFILE%`), and MeetRec
+saves paths under your home as `~/…`, so the same file works on another computer. Logins, API keys
+and tokens are **not** in it (they stay in the `tokens` folder next to it). Keys starting with `_`
+(e.g. `"_comment"`) are ignored, for your notes. JSON was chosen over YAML because the three programs
+read it without extra libraries.
+
+```sh
+meet init                              # a few questions, then the file is ready
+meet config                            # what is in the file;  --all: every effective value
+meet config keys                       # every setting, its type and allowed values
+meet config set output_dir ~/Notes/Meetings
+meet config set output_formats md,json,srt
+meet config set md_style obsidian      # or plain
+meet config get output_dir
+meet config unset md_style             # back to the default
+meet config check                      # validate the file
+meet config export ~/meetrec.json      # portable copy (without the settings tied to this computer)
+meet config import ~/meetrec.json      # on the other computer (merges; --replace to overwrite); backup kept
+meet config path                       # where the file is
+```
+
+Settings > System > **Configuration file** shows the same file. Example:
 [`config.example.json`](config.example.json).
 
 | Key | Default | Notes |
 |---|---|---|
-| `vault` | — | required |
-| `meetings_dir` | `Meetings` | relative to the vault |
-| `people_dir` | `People` | relative to the vault |
+| `output_dir` | `~/Documents/MeetRec` | folder for notes and transcripts (can be inside an Obsidian vault) |
+| `output_formats` | `["md"]` | any of `md`, `txt`, `json`, `srt`, `vtt` |
+| `output_layout` | `month` | `month`: `YYYY-MM` subfolders; `flat`: one folder |
+| `md_style` | `plain` | `obsidian`: frontmatter, callouts, `[[people]]` links |
+| `vault` | `""` | Obsidian style: vault root, where `people_dir` is |
+| `people_dir` | `People` | Obsidian style: person notes, relative to the vault |
 | `context` | `work` | value of `context:` in the frontmatter |
 | `recordings_dir` | `~/Recordings/meetings` | |
 | `language` | `it` | language passed to whisper |

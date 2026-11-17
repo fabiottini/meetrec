@@ -1,2 +1,26 @@
-{"ui_language": "en", "context": "work", "language": "en", "meetings_dir": "Work/Meetings", "people_dir": "Work/People",
- "recordings_dir": "/Users/you/Recordings/meetings", "summary": true, "vault": "/Users/you/Obsidian/Notes", "mic_id": null}
+{
+  "ui_language": "en",
+  "context": "work",
+  "language": "en",
+  "output_dir": "~/Documents/MeetRec",
+  "output_formats": [
+    "md",
+    "json"
+  ],
+  "output_layout": "month",
+  "md_style": "plain",
+  "people_dir": "People",
+  "recordings_dir": "~/Recordings/meetings",
+  "summary": true,
+  "vault": "",
+  "mic_id": null,
+  "calendar_accounts": [
+    {
+      "id": "microsoft-1",
+      "provider": "microsoft",
+      "authority": "organizations",
+      "scopes": "Calendars.Read offline_access openid profile",
+      "label": "fabio.lucattini@domotz.com"
+    }
+  ]
+}

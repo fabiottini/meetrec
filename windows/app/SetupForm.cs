@@ -160,7 +160,10 @@ sealed class SetupForm : Form
 
     public List<CheckItem> ComputeChecks()
     {
-        var vault = Config.Str("vault", "");
+        var output = Config.Str("output_dir", "");
+        string formats;
+        try { formats = string.Join(", ", (Config.Load()["output_formats"] as JsonArray ?? new JsonArray("md")).Select(x => x!.GetValue<string>())); }
+        catch { formats = "md"; }
         var py = Paths.Python();
         var ff = Tool("ffmpeg.exe");
         var wh = Tool("whisper-cli.exe");
@@ -176,7 +179,7 @@ sealed class SetupForm : Form
             new("whisper", "whisper.cpp", wh ?? T("setup_win_whisper_detail"), wh != null, true, wh == null ? T("setup_download") : null),
             new("model", T("setup_model"), models ? model! : T("setup_model_missing"), models, true, models ? null : T("setup_download")),
             new("mic", T("setup_mic_permission"), mic ? "OK" : T("setup_win_mic_blocked"), mic, true, mic ? null : T("setup_allow")),
-            new("vault", T("setup_vault"), vault.Length == 0 ? T("setup_vault_missing") : vault, vault.Length > 0 && Directory.Exists(vault), true, T("setup_choose")),
+            new("output", T("setup_output"), output.Length == 0 ? T("setup_output_missing") : output + " · " + formats, output.Length > 0, true, T("setup_choose")),
             new("calendars", T("cal_title"), accounts.Count == 0 ? T("cal_none") : T("cal_count", ("n", accounts.Count.ToString())),
                 accounts.Count > 0 && accounts.All(a => a["ok"]?.GetValue<bool>() == true), false, null),
             AiCheck(),
@@ -294,7 +297,7 @@ sealed class SetupForm : Form
             case "whisper": _ = InstallWhisper(); break;
             case "model": _ = InstallModels(); break;
             case "mic": Shell.Open("ms-settings:privacy-microphone"); AddLog(T("setup_win_mic_after")); break;
-            case "vault": ChooseVault(); break;
+            case "output": ChooseOutput(); break;
             case "cli": InstallCli(); break;
         }
     }
@@ -433,12 +436,12 @@ sealed class SetupForm : Form
 
     // ---------------------------------------------------------------- vault, command line
 
-    void ChooseVault()
+    void ChooseOutput()
     {
-        using var d = new FolderBrowserDialog { Description = T("setup_vault_panel"), UseDescriptionForTitle = true };
+        using var d = new FolderBrowserDialog { Description = T("setup_output_panel"), UseDescriptionForTitle = true, ShowNewFolderButton = true };
         if (d.ShowDialog(this) != DialogResult.OK) return;
         var cfg = Config.Load();
-        cfg["vault"] = d.SelectedPath;
+        cfg["output_dir"] = Shell.PortablePath(d.SelectedPath);
         Config.Save(cfg);
         BuildChecks();
     }

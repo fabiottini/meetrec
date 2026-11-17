@@ -200,7 +200,8 @@ final class SetupModel: NSObject, ObservableObject, URLSessionDownloadDelegate {
     private func build() {
         let brew = findTool("brew")
         let cfg = (try? JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: configFile)))) as? [String: Any] ?? [:]
-        let vault = cfg["vault"] as? String ?? ""
+        let output = cfg["output_dir"] as? String ?? ""
+        let formats = (cfg["output_formats"] as? [String] ?? ["md"]).joined(separator: ", ")
         let micOK = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
         let screenOK = CGPreflightScreenCaptureAccess()
         let cliOK = (try? String(contentsOfFile: cliPath, encoding: .utf8)) == cliWrapper()
@@ -223,8 +224,8 @@ final class SetupModel: NSObject, ObservableObject, URLSessionDownloadDelegate {
                   ok: micOK, required: true, action: micOK ? nil : T("setup_allow")),
             Check(id: "screen", title: T("setup_screen_permission"), detail: screenOK ? "OK" : T("setup_screen_permission_detail"),
                   ok: screenOK, required: true, action: screenOK ? nil : T("setup_allow")),
-            Check(id: "vault", title: T("setup_vault"), detail: vault.isEmpty ? T("setup_vault_missing") : vault,
-                  ok: !vault.isEmpty && FileManager.default.fileExists(atPath: vault), required: true, action: T("setup_choose")),
+            Check(id: "output", title: T("setup_output"), detail: output.isEmpty ? T("setup_output_missing") : output + " · " + formats,
+                  ok: !output.isEmpty, required: true, action: T("setup_choose")),
             Check(id: "calendars", title: T("cal_title"),
                   detail: accounts.isEmpty ? T("cal_none") : T("cal_count", ["n": "\(accounts.count)"]),
                   ok: !accounts.isEmpty && accounts.allSatisfy(\.ok), required: false, action: nil),
@@ -268,7 +269,7 @@ final class SetupModel: NSObject, ObservableObject, URLSessionDownloadDelegate {
                 log += T("setup_screen_restart") + "\n"
             }
             build()
-        case "vault": chooseVault()
+        case "output": chooseOutput()
         case "cli": installCLI()
         default: break
         }
@@ -379,14 +380,14 @@ final class SetupModel: NSObject, ObservableObject, URLSessionDownloadDelegate {
         }
     }
 
-    private func chooseVault() {
+    private func chooseOutput() {
         let p = NSOpenPanel()
-        p.canChooseDirectories = true; p.canChooseFiles = false
-        p.message = T("setup_vault_panel")
+        p.canChooseDirectories = true; p.canChooseFiles = false; p.canCreateDirectories = true
+        p.message = T("setup_output_panel")
         NSApp.activate(ignoringOtherApps: true)
         guard p.runModal() == .OK, let u = p.url else { return }
         var cfg = (try? JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: configFile)))) as? [String: Any] ?? [:]
-        cfg["vault"] = u.path
+        cfg["output_dir"] = portablePath(u.path)
         try? FileManager.default.createDirectory(atPath: (configFile as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
         if let d = try? JSONSerialization.data(withJSONObject: cfg, options: [.prettyPrinted, .sortedKeys]) {
             try? d.write(to: URL(fileURLWithPath: configFile), options: .atomic)

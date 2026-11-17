@@ -50,7 +50,8 @@ def main():
     tmp = Path(tempfile.mkdtemp(prefix="meetrec-test-"))
     vault = tmp / "vault"
     vault.mkdir()
-    conf = {"recordings_dir": str(tmp / "recs"), "vault": str(vault), "meetings_dir": "Meetings",
+    conf = {"recordings_dir": str(tmp / "recs"), "output_dir": str(vault / "Meetings"), "md_style": "obsidian",
+            "output_formats": ["md", "txt", "json", "srt", "vtt"], "vault": str(vault),
             "summary": False, "language": "en", "after_process_audio": "keep", "voice_profile": "none",
             "whisper_bin": a.whisper, "whisper_model": a.model, "vad_model": a.vad or str(tmp / "none"),
             "calendar_accounts": []}
@@ -76,6 +77,18 @@ def main():
     check("## Transcript" in text, "note in English (meeting language en)")
     check(a.word.lower() in text.lower(), f"transcript contains '{a.word}'")
     check(title in text and "Jane Doe" in text, "accents, symbols and attendees survive (UTF-8)")
+    check(text.startswith("---\ntype: meeting"), "obsidian style: frontmatter")
+    stem = notes[0].with_suffix("")
+    for ext in ("txt", "srt", "vtt"):
+        f = stem.with_suffix("." + ext)
+        body = f.read_text(encoding="utf-8") if f.exists() else ""
+        check(a.word.lower() in body.lower(), f"{ext} written with the transcript")
+    check(stem.with_suffix(".vtt").read_text(encoding="utf-8").startswith("WEBVTT"), "vtt header")
+    try:
+        js = json.loads(stem.with_suffix(".json").read_text(encoding="utf-8"))
+        check(js["format"] == "meetrec-note" and js["transcript"] and js["event"]["attendees"], "json: transcript and event")
+    except Exception as e:
+        check(False, f"json output ({e})")
 
     print("== verify, peaks, list")
     check(meet("verify", str(rec), env=env).returncode == 0, "verify OK")
@@ -93,6 +106,35 @@ def main():
     check(r.returncode == 0 and "transcribing" not in r.stdout, "edit cuts without transcribing again")
     after = notes[0].read_text(encoding="utf-8")
     check("cut after the transcript" in after.lower(), "note says the audio was cut")
+
+    print("== plain Markdown, flat folder (no Obsidian)")
+    plain_dir = tmp / "plain-notes"
+    conf_path = tmp / "conf.json"
+    saved_conf = conf_path.read_text(encoding="utf-8")
+    conf_path.write_text(json.dumps({**json.loads(saved_conf), "output_dir": str(plain_dir), "md_style": "plain",
+                                     "output_layout": "flat", "output_formats": ["md"]}), encoding="utf-8")
+    meta_file = rec / "meta.json"
+    meta = json.loads(meta_file.read_text(encoding="utf-8"))
+    meta.pop("note", None)
+    meta.pop("outputs", None)
+    meta_file.write_text(json.dumps(meta), encoding="utf-8")
+    r = meet("process", str(rec), env=env)
+    plain = list(plain_dir.glob("*.md"))
+    ptext = plain[0].read_text(encoding="utf-8") if plain else ""
+    check(r.returncode == 0 and len(plain) == 1 and not ptext.startswith("---") and "[!info]" not in ptext
+          and a.word.lower() in ptext.lower(), "plain Markdown in a flat folder")
+    conf_path.write_text(saved_conf, encoding="utf-8")
+
+    print("== config from the command line")
+    r = meet("config", "set", "output_formats", "md,json", env=env)
+    cfg_file = Path(meet("config", "path", env=env).stdout.strip().splitlines()[-1])
+    check(r.returncode == 0 and json.loads(cfg_file.read_text(encoding="utf-8")).get("output_formats") == ["md", "json"],
+          "meet config set writes the file")
+    check(meet("config", "set", "md_style", "word", env=env).returncode != 0, "meet config rejects bad values")
+    exp = tmp / "exported.json"
+    check(meet("config", "export", str(exp), env=env).returncode == 0 and "mic_id" not in exp.read_text(encoding="utf-8"),
+          "meet config export (portable, no machine settings)")
+    check(meet("config", "check", env=env).returncode == 0, "meet config check")
 
     print("== delete the audio after the check")
     r = meet("drop-audio", str(rec), env=env)
