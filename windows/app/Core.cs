@@ -14,7 +14,25 @@ static class Paths
     static readonly string Roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
     static readonly string Local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
     public static readonly string ConfDir = Path.Combine(Roaming, "MeetRec");
-    public static string ConfigFile => Environment.GetEnvironmentVariable("MEETREC_CONFIG_FILE") ?? Path.Combine(ConfDir, "config.json");
+    public static string DefaultConfigFile => Path.Combine(ConfDir, "config.json");
+
+    /// the settings file: MEETREC_CONFIG_FILE, else the file named by "config_file" in the default one
+    /// (`meet config use <file>`, Settings > System > Use another file), else the default
+    public static string ConfigFile
+    {
+        get
+        {
+            var e = Environment.GetEnvironmentVariable("MEETREC_CONFIG_FILE");
+            if (!string.IsNullOrEmpty(e)) return Shell.ExpandPath(e);
+            try
+            {
+                if (JsonNode.Parse(File.ReadAllText(DefaultConfigFile, Encoding.UTF8))?["config_file"]?.GetValue<string>() is { Length: > 0 } p)
+                    return Shell.ExpandPath(p);
+            }
+            catch { }
+            return DefaultConfigFile;
+        }
+    }
     public static readonly string DataDir = Path.Combine(Local, "MeetRec");           // tools and models (setup)
     public static readonly string StateDir = Path.Combine(DataDir, "state");
     public static readonly string StateFile = Path.Combine(StateDir, "current.json");

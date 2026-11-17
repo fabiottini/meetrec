@@ -4,6 +4,16 @@ Versions follow [Semantic Versioning](https://semver.org/): MAJOR.MINOR.PATCH.
 MAJOR for changes that break existing use (config, CLI, notes), MINOR for new features,
 PATCH for fixes. Every release has a git tag `vX.Y.Z` (`make tag`).
 
+## 1.10.0 – 2026-11-17
+
+- **Choose where the settings file lives**: Settings > System > **Use another file…** or
+  `meet config use <file>` (e.g. a synced folder shared by several computers; the apps and `meet`
+  follow it), `meet config use default` to undo; `meet --config <file>` for one command;
+  `MEETREC_CONFIG_FILE` as before. `meet config path` says which file is in use and why.
+- README: new section "Your settings in one file: backup, move, replicate" (what is in the file,
+  backup, moving to a new computer, the same settings on several computers, what is not in the file).
+- README images updated, also the Windows ones.
+
 ## 1.9.1 – 2026-11-17
 
 - `make install` / `make install-zip` / `install.sh` put the app in `/Applications` (with the other

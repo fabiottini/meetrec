@@ -62,9 +62,43 @@ else:
     STATE_DIR = HOME / ".local" / "state" / "meetrec"
 if os.environ.get("MEETREC_CONF_DIR"):        # tests: config, tokens and keys in a temporary folder
     CONF_DIR = Path(os.environ["MEETREC_CONF_DIR"])
-# the one configuration file, read at startup by meet, the macOS app and the Windows app.
-# MEETREC_CONFIG_FILE points to another one (e.g. a file you keep in a synced folder).
-CONFIG_FILE = Path(os.environ["MEETREC_CONFIG_FILE"]).expanduser() if os.environ.get("MEETREC_CONFIG_FILE") else CONF_DIR / "config.json"
+# The one configuration file, read at startup by meet, the macOS app and the Windows app.
+# Which file, first match wins:
+#   1. meet --config <file> …            (this command only)
+#   2. MEETREC_CONFIG_FILE=<file>        (environment)
+#   3. {"config_file": "<file>"} in the default file: set by `meet config use <file>` or
+#      Settings > System > Use another file; every program follows it (e.g. a synced folder)
+#   4. the default: ~/.config/meetrec/config.json, %APPDATA%\MeetRec\config.json
+DEFAULT_CONFIG = CONF_DIR / "config.json"
+
+
+def _expand(p):
+    return Path(os.path.expandvars(os.path.expanduser(p)))
+
+
+def resolve_config_file():
+    """(file, how it was chosen); also removes --config from the arguments"""
+    argv = sys.argv
+    for i, arg in enumerate(argv[1:], 1):
+        if arg == "--config" and i + 1 < len(argv):
+            path = argv[i + 1]
+            del argv[i:i + 2]
+            return _expand(path), "--config"
+        if arg.startswith("--config="):
+            del argv[i]
+            return _expand(arg.split("=", 1)[1]), "--config"
+    if os.environ.get("MEETREC_CONFIG_FILE"):
+        return _expand(os.environ["MEETREC_CONFIG_FILE"]), "MEETREC_CONFIG_FILE"
+    try:
+        ptr = json.loads(DEFAULT_CONFIG.read_text(encoding="utf-8")).get("config_file")
+        if ptr:
+            return _expand(ptr), f"config_file in {DEFAULT_CONFIG}"
+    except (OSError, ValueError, AttributeError):
+        pass
+    return DEFAULT_CONFIG, "default"
+
+
+CONFIG_FILE, CONFIG_SOURCE = resolve_config_file()
 CURRENT = STATE_DIR / "current.json"
 VIBE_SUPPORT = HOME / "Library/Application Support/github.com.thewh1teagle.vibe"
 # models (and on Windows the tools) downloaded by the app setup
@@ -2664,11 +2698,51 @@ def config_problems(cfg):
     return out
 
 
+def config_use(a):
+    """keep the settings in another file: the default file only points to it"""
+    if a.default or (a.key or "").lower() == "default":
+        if CONFIG_FILE == DEFAULT_CONFIG:
+            say(f"already using the default file {DEFAULT_CONFIG}")
+            return 0
+        DEFAULT_CONFIG.write_text(CONFIG_FILE.read_text() if CONFIG_FILE.exists() else "{}\n")
+        say(f"back to the default file {DEFAULT_CONFIG} (settings copied from {CONFIG_FILE}, which stays as it is)")
+        return 0
+    if not a.key:
+        raise SystemExit("[meet] meet config use <file> | meet config use default")
+    target = _expand(a.key).resolve()
+    if target.suffix.lower() != ".json":
+        raise SystemExit("[meet] the settings file must be a .json file")
+    if not target.parent.is_dir():
+        raise SystemExit(f"[meet] folder not found: {target.parent}")
+    if target.exists():
+        try:
+            json.loads(target.read_text())
+        except ValueError:
+            raise SystemExit(f"[meet] {target} is not valid JSON") from None
+        say(f"using the settings in {target}")
+    else:
+        target.write_text(json.dumps(read_config_file(), indent=2, ensure_ascii=False, sort_keys=True) + "\n")
+        say(f"current settings copied to {target}")
+    if DEFAULT_CONFIG.exists() and "config_file" not in read_json(DEFAULT_CONFIG, {}):
+        backup = DEFAULT_CONFIG.with_name(f"config.{now():%Y%m%d-%H%M%S}.bak.json")
+        backup.write_text(DEFAULT_CONFIG.read_text())
+        say(f"previous file kept as {backup.name}")
+    DEFAULT_CONFIG.parent.mkdir(parents=True, exist_ok=True)
+    DEFAULT_CONFIG.write_text(json.dumps({"_comment": "MeetRec reads its settings from config_file",
+                                          "config_file": portable_path(str(target))}, indent=2) + "\n")
+    say(f"{DEFAULT_CONFIG} now points to it: the apps and meet read {target}")
+    return 0
+
+
 def cmd_config(a):
     cfg = read_config_file()
     if a.action == "path":
         print(CONFIG_FILE)
+        if CONFIG_SOURCE != "default" and not a.json:
+            print(f"(chosen by {CONFIG_SOURCE})", file=sys.stderr)
         return 0
+    if a.action == "use":
+        return config_use(a)
     if a.action == "keys":
         for k, (kind, allowed, what) in SCHEMA.items():
             print(f"{k:22} {kind + (': ' + '|'.join(allowed) if allowed else ''):58} {what}")
@@ -2856,14 +2930,15 @@ def main():
     sub.add_parser("login")
     sub.add_parser("logout")
     sub.add_parser("whoami")
-    s = sub.add_parser("config", help="settings: show | path | keys | get <k> | set <k> <v> | unset <k> | check | export [file] | import <file>")
+    s = sub.add_parser("config", help="settings: show | path | keys | get <k> | set <k> <v> | unset <k> | check | export [file] | import <file> | use <file>|default")
     s.add_argument("action", nargs="?", default="show",
-                   choices=["show", "path", "keys", "get", "set", "unset", "check", "export", "import"])
+                   choices=["show", "path", "keys", "get", "set", "unset", "check", "export", "import", "use"])
     s.add_argument("key", nargs="?")
     s.add_argument("value", nargs="?")
     s.add_argument("--all", action="store_true", help="show: effective values; export: also the settings tied to this computer")
     s.add_argument("--json", action="store_true")
     s.add_argument("--replace", action="store_true", help="import: replace the whole file instead of merging")
+    s.add_argument("--default", action="store_true", help="use: back to the default file")
     sub.add_parser("init", help="answer a few questions to create or update the configuration")
     s = sub.add_parser("ai", help="AI for summary and instructions: status | key <provider> [--delete] | test")
     s.add_argument("action", nargs="?", default="status", choices=["status", "key", "test"])

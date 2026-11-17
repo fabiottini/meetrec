@@ -177,11 +177,33 @@ sealed class SettingsForm : Form
         atLogin = Check(T("open_meetrec_at_login"), LaunchAtLogin());
         atLogin.CheckedChanged += (_, _) => SetLaunchAtLogin(atLogin.Checked);
         var cfgRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = Padding.Empty };
-        cfgRow.Controls.Add(new TextBox { Text = Paths.ConfigFile, ReadOnly = true, Width = 300 });
+        var cfgPath = new TextBox { Text = Paths.ConfigFile, ReadOnly = true, Width = 300 };
+        cfgRow.Controls.Add(cfgPath);
         var reveal = new Button { Text = T("config_reveal"), AutoSize = true };
         reveal.Click += (_, _) => System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{Paths.ConfigFile}\"");
         cfgRow.Controls.Add(reveal);
         Row(T("config_file"), cfgRow);
+        var useRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = Padding.Empty };
+        var useOther = new Button { Text = T("config_use_other"), AutoSize = true };
+        var useDefault = new Button { Text = T("config_use_default"), AutoSize = true, Enabled = Paths.ConfigFile != Paths.DefaultConfigFile };
+        var useMsg = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Margin = new Padding(6, 7, 0, 0) };
+        useRow.Controls.Add(useOther); useRow.Controls.Add(useDefault); useRow.Controls.Add(useMsg);
+        Row("", useRow);
+        void After(int st, string o)
+        {
+            if (IsDisposed) return;
+            cfgPath.Text = Paths.ConfigFile;
+            useDefault.Enabled = Paths.ConfigFile != Paths.DefaultConfigFile;
+            useMsg.Text = st == 0 ? T("config_now", ("path", Paths.ConfigFile)) : Meet.LastLine(o).Replace("[meet] ", "");
+        }
+        // an existing .json is used as it is; a new name gets the current settings (e.g. in a synced folder)
+        useOther.Click += (_, _) =>
+        {
+            using var d = new SaveFileDialog { Title = T("config_use_panel"), Filter = "JSON|*.json", FileName = "meetrec-config.json", OverwritePrompt = false };
+            if (d.ShowDialog(this) != DialogResult.OK) return;
+            Meet.Run(new[] { "config", "use", d.FileName }, After);
+        };
+        useDefault.Click += (_, _) => Meet.Run(new[] { "config", "use", "default" }, After);
         Row("", new Label { Text = T("config_hint"), AutoSize = true, MaximumSize = new Size(480, 0), ForeColor = SystemColors.GrayText });
         var priv = Row("", new Button { Text = T("microphone_permission"), AutoSize = true });
         priv.Click += (_, _) => Shell.Open("ms-settings:privacy-microphone");

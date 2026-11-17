@@ -14,7 +14,17 @@ let bundledScript = Bundle.main.resourceURL.map { $0.appendingPathComponent("mee
 let bundledCapture = Bundle.main.bundlePath + "/Contents/MacOS/meetrec-capture"
 let meetBin = "\(home)/.local/bin/meet"
 let stateFile = "\(home)/.local/state/meetrec/current.json"
-let configFile = ProcessInfo.processInfo.environment["MEETREC_CONFIG_FILE"] ?? "\(home)/.config/meetrec/config.json"
+/// the settings file: MEETREC_CONFIG_FILE, else the file named by "config_file" in the default one
+/// (`meet config use <file>`, Settings > System > Use another file), else the default
+let defaultConfigFile = "\(home)/.config/meetrec/config.json"
+var configFile: String {
+    if let e = ProcessInfo.processInfo.environment["MEETREC_CONFIG_FILE"], !e.isEmpty { return expandPath(e) }
+    if let d = FileManager.default.contents(atPath: defaultConfigFile),
+       let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any], let p = j["config_file"] as? String, !p.isEmpty {
+        return expandPath(p)
+    }
+    return defaultConfigFile
+}
 let appLog = "\(home)/.local/state/meetrec/app.log"
 
 // MARK: - UI language
@@ -286,6 +296,8 @@ final class Settings: ObservableObject {
     @Published var aiKeyInput = ""
     @Published var aiStatus = ""
     @Published var aiKeys: [String: Bool] = [:]
+    @Published var configPath = configFile
+    @Published var configMessage = ""
     @Published var mics: [(name: String, id: String)] = []
     @Published var account = "…"
     @Published var loginMessage = ""
@@ -320,6 +332,7 @@ final class Settings: ObservableObject {
         voiceProfile = raw["voice_profile"] as? String ?? "none"
         voiceScope = raw["voice_profile_scope"] as? String ?? "mine"
         afterAudio = raw["after_process_audio"] as? String ?? "ask"
+        configPath = configFile
         aiProvider = raw["ai_provider"] as? String ?? "claude-code"
         aiModel = raw["ai_model"] as? String ?? ""
         aiBaseURL = raw["ai_base_url"] as? String ?? ""
@@ -416,6 +429,32 @@ final class Settings: ObservableObject {
         aiStatus = T("ai_testing")
         runMeet(["ai", "test"]) { _, out in
             self.aiStatus = out.split(separator: "\n").last.map { $0.replacingOccurrences(of: "[meet] ", with: "") } ?? ""
+        }
+    }
+
+    /// keep the settings in another file (e.g. a synced folder): an existing one is used as it is,
+    /// a new one gets the current settings; the default file then only points to it
+    func useOtherConfig() {
+        let p = NSOpenPanel()
+        p.canChooseFiles = true; p.canChooseDirectories = true; p.canCreateDirectories = true
+        p.allowedContentTypes = [.json, .folder]
+        p.message = T("config_use_panel")
+        NSApp.activate(ignoringOtherApps: true)
+        guard p.runModal() == .OK, var u = p.url else { return }
+        if (try? u.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
+            u = u.appendingPathComponent("meetrec-config.json")
+        }
+        runMeet(["config", "use", u.path]) { status, out in
+            self.configMessage = status == 0 ? T("config_now", ["path": (u.path as NSString).abbreviatingWithTildeInPath])
+                                             : (out.split(separator: "\n").last.map(String.init) ?? "")
+            self.load()
+        }
+    }
+
+    func useDefaultConfig() {
+        runMeet(["config", "use", "default"]) { _, _ in
+            self.configMessage = T("config_now", ["path": (defaultConfigFile as NSString).abbreviatingWithTildeInPath])
+            self.load()
         }
     }
 
@@ -556,10 +595,16 @@ struct SettingsView: View {
                 Toggle(T("open_meetrec_at_login"), isOn: Binding(get: { s.launchAtLogin }, set: { s.setLaunchAtLogin($0) }))
                 HStack {
                     Text(T("config_file")); Spacer()
-                    Text((configFile as NSString).abbreviatingWithTildeInPath).font(.caption).textSelection(.enabled)
+                    Text((s.configPath as NSString).abbreviatingWithTildeInPath).font(.caption).textSelection(.enabled)
+                        .lineLimit(1).truncationMode(.middle)
                     Button(T("config_reveal")) {
                         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: configFile)])
                     }
+                }
+                HStack {
+                    Button(T("config_use_other")) { s.useOtherConfig() }
+                    if s.configPath != defaultConfigFile { Button(T("config_use_default")) { s.useDefaultConfig() } }
+                    Text(s.configMessage).font(.caption).foregroundStyle(.secondary)
                 }
                 Text(T("config_hint")).font(.caption).foregroundStyle(.secondary)
                 HStack {
