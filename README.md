@@ -57,8 +57,72 @@ settings to another computer. See [Configuration](#configuration).
 - Always tell the people in the call that you are recording.
 - Calendars (Microsoft, Google) are optional and need a one-time setup with the guide in Setup.
 
+**Moving to another computer, or setting up a second one?** All your settings are in **one file**:
+copy it and you are done. See [Your settings in one file](#your-settings-in-one-file-backup-move-replicate).
+
 **Something wrong?** [Open an issue](https://github.com/fabiottini/meetrec/issues) with a screenshot,
 the log (menu > **Log**) and your system (Windows 10/11, Mac Intel/Apple Silicon).
+
+## Your settings in one file: backup, move, replicate
+
+**Everything you set up in MeetRec lives in one plain JSON file**, `config.json`: output folder and
+formats, Markdown style, languages, audio options, AI provider and model, calendar accounts. The
+macOS app, the Windows app and the `meet` command all read it when they start, and all write it
+when you change something. There is no hidden database.
+
+| System | The file | Open it |
+|---|---|---|
+| macOS | `~/.config/meetrec/config.json` | Settings > System > **Show the file**, or `open -R ~/.config/meetrec/config.json` |
+| Windows | `%APPDATA%\MeetRec\config.json` | Settings > System > **Show the file**, or `explorer /select,"%APPDATA%\MeetRec\config.json"` |
+| anywhere | `meet config path` prints it | |
+
+The same file works on macOS and on Windows: paths are saved as `~/…` (your home folder) and may use
+environment variables (`$HOME`, `%USERPROFILE%`). It is readable and editable by hand, and
+`meet config check` tells you if something is wrong.
+
+**Back up the settings**
+
+```sh
+meet config export ~/Backup/meetrec-config.json     # or simply copy config.json
+```
+
+**Move to a new computer** (Mac to Mac, Windows to Windows, or across)
+
+1. Install MeetRec on the new computer (see [Quick start](#quick-start)).
+2. Copy the exported file there and run `meet config import meetrec-config.json`
+   (or put it in place of `config.json` before opening the app).
+3. Open the Setup: download the speech model, give the permissions, sign in again to the calendars
+   (the accounts are already listed, only the login is needed), type the AI API key if you use one.
+
+**Set up several computers the same way** (yours, a colleague's, a team): prepare one file, then on
+each computer `meet config import team-config.json`. Import **merges**: settings tied to that
+computer (microphone, tool paths, CPU threads) stay as they are; the previous file is saved next to
+it as `config.<date>.bak.json`. Use `--replace` to overwrite the whole file instead.
+
+**Choose where the file lives** (for example in iCloud Drive, OneDrive, Dropbox or a git repository,
+so several computers share it):
+
+| How | For |
+|---|---|
+| Settings > System > **Use another file…**, or `meet config use ~/Dropbox/meetrec-config.json` | always: the apps and `meet` read that file from now on. An existing file is used as it is; a new one gets your current settings. The default file then only holds `{"config_file": "…"}` (the old content is kept as a `.bak.json`). **Back to the default file** / `meet config use default` undoes it. |
+| `meet --config ~/test-config.json <command>` | one command only, e.g. to try a configuration |
+| `MEETREC_CONFIG_FILE=~/x.json` (environment) | scripts and services |
+
+Order when more than one is set: `--config`, then `MEETREC_CONFIG_FILE`, then the saved choice,
+then the default file. `meet config path` prints the file in use and what chose it.
+
+**What is not in the file, on purpose**
+
+| | Where | To bring it along |
+|---|---|---|
+| Calendar logins, AI API keys | `tokens/` next to `config.json` (readable only by you) | sign in again / `meet ai key <provider>`; copying the folder works but carries secrets |
+| Google OAuth client | `google_client.json` next to `config.json` | copy it, or choose the JSON again in Setup |
+| Your translations | `locales/` next to `config.json` | copy the folder |
+| Speech models (1.6 GB) | macOS `~/Library/Application Support/MeetRec/models`, Windows `%LOCALAPPDATA%\MeetRec\models` | download again in Setup (checked with SHA-256), or copy |
+| Recordings and notes | `recordings_dir` and `output_dir` | they are ordinary folders: back them up like any other |
+
+A full backup of a computer is therefore: `config.json` (plus `tokens/` if you want to keep the
+logins), the notes folder, and, if you keep the audio, the recordings folder.
 
 ## Why
 
@@ -95,7 +159,8 @@ to disk while you record, so a crash does not lose it.
   frontmatter and links to people), plain text, JSON (for other programs), SRT and WebVTT subtitles,
   with timestamps and speakers.
 - **One settings file**, read at startup by the app and by `meet`: copy it to another computer and
-  everything is set; `meet config` changes any setting from the command line.
+  everything is set; `meet config` changes any setting from the command line. See
+  [Your settings in one file](#your-settings-in-one-file-backup-move-replicate).
 
 ## Fast and offline
 
@@ -319,6 +384,7 @@ please [open an issue](https://github.com/fabiottini/meetrec/issues) if somethin
 <img src="docs/windows/which-meeting.png" width="440" alt="Which meeting was it?">
 </p>
 <p align="center"><img src="docs/windows/editor.png" width="640" alt="Audio editor on Windows"></p>
+<p align="center"><img src="docs/windows/settings-ai.png" width="560" alt="Windows settings: AI provider and the configuration file (Show the file, Use another file)"></p>
 
 What is different from the Mac:
 
@@ -573,7 +639,7 @@ One JSON file, read at startup by `meet`, the macOS app and the Windows app:
 |---|---|
 | macOS | `~/.config/meetrec/config.json` |
 | Windows | `%APPDATA%\MeetRec\config.json` |
-| any | the file in `MEETREC_CONFIG_FILE`, if set (e.g. one kept in a synced folder) |
+| any | the file you chose with `meet config use` or Settings > System > Use another file, `meet --config <file>`, or `MEETREC_CONFIG_FILE` (see [Your settings in one file](#your-settings-in-one-file-backup-move-replicate)) |
 
 **Portable**: paths can use `~` and environment variables (`$HOME`, `%USERPROFILE%`), and MeetRec
 saves paths under your home as `~/…`, so the same file works on another computer. Logins, API keys
@@ -593,7 +659,9 @@ meet config unset md_style             # back to the default
 meet config check                      # validate the file
 meet config export ~/meetrec.json      # portable copy (without the settings tied to this computer)
 meet config import ~/meetrec.json      # on the other computer (merges; --replace to overwrite); backup kept
-meet config path                       # where the file is
+meet config path                       # where the file is, and what chose it
+meet config use ~/Dropbox/meetrec.json # keep the settings there from now on (apps too); "use default" to undo
+meet --config ~/test.json status       # any command with another file, this time only
 ```
 
 Settings > System > **Configuration file** shows the same file. Example:

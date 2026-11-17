@@ -135,6 +135,19 @@ def main():
     check(meet("config", "export", str(exp), env=env).returncode == 0 and "mic_id" not in exp.read_text(encoding="utf-8"),
           "meet config export (portable, no machine settings)")
     check(meet("config", "check", env=env).returncode == 0, "meet config check")
+    other = tmp / "synced" / "meetrec-config.json"
+    other.parent.mkdir()
+    r = meet("config", "use", str(other), env=env)
+    check(r.returncode == 0 and other.exists()
+          and Path(meet("config", "path", env=env).stdout.strip().splitlines()[-1]).resolve() == other.resolve(),
+          "meet config use <file>: everything reads the other file")
+    alt = tmp / "alt.json"
+    alt.write_text('{"language": "en"}', encoding="utf-8")
+    check(Path(meet("--config", str(alt), "config", "path", env=env).stdout.strip().splitlines()[-1]) == alt,
+          "meet --config <file> for one command")
+    r = meet("config", "use", "default", env=env)
+    check(r.returncode == 0 and Path(meet("config", "path", env=env).stdout.strip().splitlines()[-1]) == cfg_file,
+          "meet config use default")
 
     print("== delete the audio after the check")
     r = meet("drop-audio", str(rec), env=env)
