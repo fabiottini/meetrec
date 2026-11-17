@@ -343,7 +343,7 @@ make                # list the targets
 | Command | What it does |
 |---|---|
 | `make build` | builds `dist/MeetRec.app` (Apple Silicon + Intel) and `dist/MeetRec.zip` |
-| `make install` | build, copy to `~/Applications`, open (refuses while a recording is running) |
+| `make install` | build, copy to `/Applications`, open (refuses while a recording is running; removes an older copy in `~/Applications` and updates the `meet` command) |
 | `make install-zip` | installs the committed `dist/MeetRec.zip`, without building |
 | `make open` | opens the installed app |
 | `make cli` | installs the `meet` command (`~/.local/bin/meet`), using the installed app |

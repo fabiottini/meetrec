@@ -4,6 +4,12 @@ Versions follow [Semantic Versioning](https://semver.org/): MAJOR.MINOR.PATCH.
 MAJOR for changes that break existing use (config, CLI, notes), MINOR for new features,
 PATCH for fixes. Every release has a git tag `vX.Y.Z` (`make tag`).
 
+## 1.9.1 – 2026-11-17
+
+- `make install` / `make install-zip` / `install.sh` put the app in `/Applications` (with the other
+  apps) instead of `~/Applications`; an older copy in `~/Applications` is removed and the `meet`
+  command is pointed to the new place.
+
 ## 1.9.0 – 2026-11-17
 
 - **No Obsidian needed**: notes and transcripts go to a folder you choose (`output_dir`, default
