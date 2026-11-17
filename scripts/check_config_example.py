@@ -6,15 +6,15 @@ import sys
 import tempfile
 from pathlib import Path
 
-ex = Path("config.example.json").read_text().strip()
-readme = Path("README.md").read_text()
+ex = Path("config.example.json").read_text(encoding="utf-8").strip()
+readme = Path("README.md").read_text(encoding="utf-8")
 m = re.search(r"<!-- config-example:start -->\n```json\n(.*?)\n```\n<!-- config-example:end -->", readme, re.S)
 ok = True
 if not m or m.group(1).strip() != ex:
     print("README: the config example differs from config.example.json")
     ok = False
 with tempfile.TemporaryDirectory() as d:
-    Path(d, "config.json").write_text(ex)
+    Path(d, "config.json").write_text(ex, encoding="utf-8")
     r = subprocess.run([sys.executable, "meet.py", "config", "check"], capture_output=True, text=True,
                        env={**os.environ, "MEETREC_CONF_DIR": d})
     if r.returncode:
