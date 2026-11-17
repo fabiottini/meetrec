@@ -36,7 +36,7 @@ install-zip: ## install the committed dist/MeetRec.zip, without building
 
 after-install: # older versions went to ~/Applications: remove that copy; point the meet command to this app
 	@if [ -f "$(OLD)/Contents/Resources/meet.py" ]; then rm -r "$(OLD)" && echo "removed the old copy $(OLD)"; fi
-	@if grep -q "installed by MeetRec" $(CLI) 2>/dev/null && ! grep -q "$(DEST)" $(CLI); then $(MAKE) --no-print-directory cli; fi
+	@if grep -q "installed by MeetRec" $(CLI) 2>/dev/null && ! grep -q "\"$(DEST)/" $(CLI); then $(MAKE) --no-print-directory cli; fi
 
 open: ## open the installed app
 	open "$(DEST)"
