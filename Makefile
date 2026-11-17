@@ -47,10 +47,11 @@ cli: ## install the meet command (~/.local/bin/meet), using the installed app
 	  "$(DEST)/Contents/MacOS/meetrec-capture" "$(PYTHON)" "$(DEST)/Contents/Resources/meet.py" > $(CLI)
 	@chmod 755 $(CLI) && echo "installed $(CLI)"
 
-check: ## syntax check of meet.py, locale keys, Info.plist
+check: ## syntax check of meet.py, locale keys, Info.plist, config example
 	$(PYTHON) -m py_compile meet.py && rm -r __pycache__
 	plutil -lint menubar/Info.plist
 	$(PYTHON) scripts/check_locales.py
+	$(PYTHON) scripts/check_config_example.py
 
 docs: build ## render the README images (docs/*.png) from the app, in English
 	MEETREC_CONFIG_FILE=docs/demo-config.json $(APP)/Contents/MacOS/MeetRec --render-docs "$(CURDIR)/docs"
