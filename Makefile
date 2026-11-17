@@ -2,14 +2,15 @@
 
 APP    := dist/MeetRec.app
 ZIP    := dist/MeetRec.zip
-DEST   := $(HOME)/Applications/MeetRec.app
+DEST   := /Applications/MeetRec.app
+OLD    := $(HOME)/Applications/MeetRec.app
 CLI    := $(HOME)/.local/bin/meet
 PYTHON ?= $(shell command -v /opt/homebrew/bin/python3 || command -v python3)
 
 .DEFAULT_GOAL := help
 VERSION := $(shell tr -d ' \n' < VERSION)
 
-.PHONY: help build install install-zip open cli check docs release uninstall clean version bump-patch bump-minor bump-major tag sync-github release-github github-hardening
+.PHONY: after-install help build install install-zip open cli check docs release uninstall clean version bump-patch bump-minor bump-major tag sync-github release-github github-hardening
 
 help: ## list the targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  make %-12s %s\n", $$1, $$2}'
@@ -17,20 +18,25 @@ help: ## list the targets
 build: ## build dist/MeetRec.app (universal) and dist/MeetRec.zip
 	./build.sh
 
-install: build ## build, copy to ~/Applications and open
+install: build ## build, copy to /Applications and open
 	@if pgrep -f meetrec-capture >/dev/null; then echo "a recording is running: stop it first"; exit 1; fi
 	-@pkill -x MeetRec
-	@mkdir -p $(HOME)/Applications
 	@if [ -d "$(DEST)" ]; then rm -r "$(DEST)"; fi
 	ditto $(APP) "$(DEST)"
+	@$(MAKE) --no-print-directory after-install
 	open "$(DEST)"
 
 install-zip: ## install the committed dist/MeetRec.zip, without building
 	@if pgrep -f meetrec-capture >/dev/null; then echo "a recording is running: stop it first"; exit 1; fi
 	-@pkill -x MeetRec
-	@tmp=$$(mktemp -d) && ditto -x -k $(ZIP) "$$tmp" && mkdir -p $(HOME)/Applications && \
+	@tmp=$$(mktemp -d) && ditto -x -k $(ZIP) "$$tmp" && \
 	  if [ -d "$(DEST)" ]; then rm -r "$(DEST)"; fi && ditto "$$tmp/MeetRec.app" "$(DEST)" && rm -r "$$tmp"
+	@$(MAKE) --no-print-directory after-install
 	open "$(DEST)"
+
+after-install: # older versions went to ~/Applications: remove that copy; point the meet command to this app
+	@if [ -f "$(OLD)/Contents/Resources/meet.py" ]; then rm -r "$(OLD)" && echo "removed the old copy $(OLD)"; fi
+	@if grep -q "installed by MeetRec" $(CLI) 2>/dev/null && ! grep -q "$(DEST)" $(CLI); then $(MAKE) --no-print-directory cli; fi
 
 open: ## open the installed app
 	open "$(DEST)"
@@ -57,6 +63,7 @@ release: check docs ## check + build + docs; then commit (zip and docs included)
 uninstall: ## remove the app and the meet command (config, tokens and recordings are kept)
 	-@pkill -x MeetRec
 	@if [ -d "$(DEST)" ]; then rm -r "$(DEST)" && echo "removed $(DEST)"; fi
+	@if [ -f "$(OLD)/Contents/Resources/meet.py" ]; then rm -r "$(OLD)" && echo "removed $(OLD)"; fi
 	@if grep -q "installed by MeetRec" $(CLI) 2>/dev/null; then rm $(CLI) && echo "removed $(CLI)"; fi
 
 clean: ## remove the build folder dist/MeetRec.app (the zip stays)

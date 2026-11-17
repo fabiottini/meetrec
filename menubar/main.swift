@@ -1,5 +1,5 @@
 // MeetRec: menu bar front-end for the `meet` CLI.
-// Build: ../build-app.sh  (creates ~/Applications/MeetRec.app)
+// Build: make install  (creates /Applications/MeetRec.app)
 
 import AppKit
 import ServiceManagement
