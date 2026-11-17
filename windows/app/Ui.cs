@@ -62,8 +62,22 @@ sealed class Alert : Form
 
     public Func<int, bool> Check = _ => true;
 
+    /// tests only (--test-flow): answer dialogs without showing them
+    public static Func<Alert, int>? AutoAnswer;
+
+    public IEnumerable<Control> AllControls() => All(this);
+    static IEnumerable<Control> All(Control c) { foreach (Control x in c.Controls) { yield return x; foreach (var y in All(x)) yield return y; } }
+
     public int Run(Control? focus = null)
     {
+        if (AutoAnswer != null)
+        {
+            CreateControl();
+            var ans = AutoAnswer(this);
+            Console.WriteLine($"  dialog \"{Controls[0].Controls[0].Text}\" -> button {ans}");
+            Result = Check(ans) ? ans : -1;
+            return Result;
+        }
         if (focus != null) Shown += (_, _) => focus.Focus();
         Shown += (_, _) => { Activate(); TopMost = false; TopMost = true; };
         ShowDialog();
@@ -136,13 +150,14 @@ static class Icons
         g.Clear(Color.Transparent);
         using (var tile = Rounded(new RectangleF(1 * s, 1 * s, 16 * s, 16 * s), 4.5f * s))
         using (var b = new SolidBrush(tileColor)) g.FillPath(b, tile);
-        float[] heights = { 3.5f, 7.5f, 11f, 6.5f, 3.5f };
+        // 3 thick bars at tray size (5 thin ones blur at 16 px), 5 bars when bigger
+        float[] heights = size < 26 ? new[] { 6f, 11.5f, 7.5f } : new[] { 3.5f, 7.5f, 11f, 6.5f, 3.5f };
         if (levelDb is double db)
         {
             float f = (float)Math.Clamp((db + 55) / 40, 0.2, 1);
             heights = heights.Select(h => Math.Max(1.6f, h * f)).ToArray();
         }
-        float w = 1.6f * s, gap = 1.3f * s;
+        float w = (size < 26 ? 2.6f : 1.6f) * s, gap = (size < 26 ? 1.9f : 1.3f) * s;
         float x = 9 * s - (heights.Length * w + (heights.Length - 1) * gap) / 2;
         // cut-out bars: paint them in "transparent" with SourceCopy
         g.CompositingMode = fill == null ? CompositingMode.SourceCopy : CompositingMode.SourceOver;
@@ -183,6 +198,53 @@ static class Icons
     public static void Release(Icon? i) { if (i != null) { DestroyIcon(i.Handle); i.Dispose(); } }
 
     static Icon? app;
-    /// window icon: the red tile
-    public static Icon App => app ??= ToIcon(Glyph(32, Color.FromArgb(0xE5, 0x39, 0x35), null));
+    /// the MeetRec icon (MeetRec.ico, also embedded in the exe), every size: windows, tray at rest
+    public static Icon App => app ??= LoadApp();
+
+    static Icon LoadApp()
+    {
+        try
+        {
+            using var s = typeof(Icons).Assembly.GetManifestResourceStream("MeetRec.ico");
+            if (s != null) return new Icon(s);
+        }
+        catch { }
+        return ToIcon(Glyph(32, Color.FromArgb(0xE5, 0x39, 0x35), null));
+    }
+
+    /// the app icon at a given size, as a bitmap (tray at rest, headers)
+    public static Bitmap AppBitmap(int size)
+    {
+        using var i = new Icon(App, new Size(size, size));
+        var b = i.ToBitmap();
+        if (b.Width == size) return b;
+        var r = new Bitmap(size, size);
+        using (var g = Graphics.FromImage(r)) { g.InterpolationMode = InterpolationMode.HighQualityBicubic; g.DrawImage(b, 0, 0, size, size); }
+        b.Dispose();
+        return r;
+    }
+
+    /// tray at rest: the app icon; processing: with a blue dot; mic muted: with a red slash
+    public static Bitmap Idle(int size, bool processing, bool muted)
+    {
+        var b = AppBitmap(size);
+        using var g = Graphics.FromImage(b);
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        float s = size / 16f;
+        if (processing)
+        {
+            using var br = new SolidBrush(Color.FromArgb(0x1A, 0x73, 0xE8));
+            using var pen = new Pen(Color.White, 1.2f * s);
+            g.FillEllipse(br, 9 * s, 9 * s, 6.5f * s, 6.5f * s);
+            g.DrawEllipse(pen, 9 * s, 9 * s, 6.5f * s, 6.5f * s);
+        }
+        if (muted)
+        {
+            using var w = new Pen(Color.White, 3.6f * s) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+            using var r = new Pen(Color.FromArgb(0xD9, 0x30, 0x25), 2f * s) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+            g.DrawLine(w, 2 * s, 2 * s, 14 * s, 14 * s);
+            g.DrawLine(r, 2 * s, 2 * s, 14 * s, 14 * s);
+        }
+        return b;
+    }
 }

@@ -84,15 +84,17 @@ static class MicMute
 
 sealed class LevelPanel : UserControl
 {
-    readonly Label micName = new() { AutoSize = false, AutoEllipsis = true, Height = 20 };
-    readonly Button mute = new() { AutoSize = true };
-    readonly Meters meters = new() { Height = 44 };
-    readonly Label status = new() { AutoSize = false, Height = 20 };
-    readonly TrackBar volume = new() { Minimum = 0, Maximum = 100, TickStyle = TickStyle.None, AutoSize = false, Height = 26 };
-    readonly Label volLabel = new() { AutoSize = false, Width = 90, Height = 20, TextAlign = ContentAlignment.MiddleRight };
+    // laid out by a table, not by pixel positions: with Windows scaling at 125-150% fixed positions overlapped
+    readonly TableLayoutPanel grid = new() { ColumnCount = 2, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Dock = DockStyle.Top, Padding = new Padding(10, 4, 10, 4) };
+    readonly Label micName = new() { AutoSize = false, AutoEllipsis = true, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
+    readonly Button mute = new() { AutoSize = true, Anchor = AnchorStyles.Right };
+    readonly Meters meters = new() { Dock = DockStyle.Fill };
+    readonly Label status = new() { AutoSize = true, Margin = new Padding(3, 2, 3, 2) };
+    readonly TrackBar volume = new() { Minimum = 0, Maximum = 100, TickStyle = TickStyle.None, AutoSize = false, Dock = DockStyle.Fill };
+    readonly Label volLabel = new() { AutoSize = true, Anchor = AnchorStyles.Right, TextAlign = ContentAlignment.MiddleRight };
     readonly CheckBox agc = new() { AutoSize = true };
     readonly Button test = new() { AutoSize = true };
-    readonly Label note = new() { AutoSize = false, Height = 34, ForeColor = SystemColors.GrayText };
+    readonly Label note = new() { AutoSize = true, ForeColor = SystemColors.GrayText };
     readonly System.Windows.Forms.Timer timer = new() { Interval = 100 };
     readonly TrayApp app;
     WasapiCapture? preview;
@@ -106,17 +108,31 @@ sealed class LevelPanel : UserControl
     {
         this.app = app;
         Font = SystemFonts.MenuFont;
-        Width = 330;
-        Height = 200;
         BackColor = Color.Transparent;
-        int x = 12, w = Width - 24;
-        micName.SetBounds(x, 6, w - 90, 20);
-        mute.Location = new Point(Width - 12 - 80, 2);
+        float k;
+        using (var g = Graphics.FromHwnd(IntPtr.Zero)) k = g.DpiX / 96f;         // Windows display scaling
+        Width = (int)(340 * k);
+        int inner = Width - (int)(24 * k);
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        micName.Height = mute.PreferredSize.Height;
         mute.Click += (_, _) => OnMuteToggled?.Invoke();
-        meters.SetBounds(x, 30, w, 44);
-        status.SetBounds(x, 76, w, 20);
-        volume.SetBounds(x - 4, 98, w - 90, 26);
-        volLabel.Location = new Point(Width - 12 - 90, 100);
+        meters.Height = (int)(44 * k);
+        volume.Height = (int)(28 * k);
+        status.MaximumSize = new Size(inner, 0);
+        note.MaximumSize = new Size(inner, 0);
+        agc.MaximumSize = new Size(inner, 0);
+        void Add(Control c, int col, int span = 1) { grid.Controls.Add(c, col, grid.RowCount); if (span > 1) grid.SetColumnSpan(c, span); }
+        void Next() => grid.RowCount++;
+        grid.RowCount = 0;
+        Add(micName, 0); Add(mute, 1); Next();
+        Add(meters, 0, 2); Next();
+        Add(status, 0, 2); Next();
+        Add(volume, 0); Add(volLabel, 1); Next();
+        Add(agc, 0, 2); Next();
+        Add(test, 0, 2); Next();
+        Add(note, 0, 2); Next();
+        Controls.Add(grid);
         volume.ValueChanged += (_, _) =>
         {
             if (settingVolume) return;
@@ -124,7 +140,6 @@ sealed class LevelPanel : UserControl
             try { if (d != null) d.AudioEndpointVolume.MasterVolumeLevelScalar = volume.Value / 100f; } catch { }
             volLabel.Text = $"{volume.Value}%";
         };
-        agc.Location = new Point(x, 128);
         agc.CheckedChanged += (_, _) =>
         {
             var c = Config.Load();
@@ -132,18 +147,19 @@ sealed class LevelPanel : UserControl
             c["auto_gain"] = agc.Checked;
             Config.Save(c);
         };
-        test.Location = new Point(x, 154);
         test.Click += (_, _) => StartPreview();
-        note.SetBounds(x + 110, 152, w - 110, 34);
-        Controls.AddRange(new Control[] { micName, mute, meters, status, volume, volLabel, agc, test, note });
         timer.Tick += (_, _) => Tick();
     }
 
     /// height for the menu: without the mic test row while recording
     public void Prepare(bool recording)
     {
-        Height = recording ? 152 : 192;
         test.Visible = note.Visible = !recording;
+        note.Text = recording ? "" : T("preview_hint");
+        test.Text = T("test_mic");
+        agc.Text = T("lower_automatically_when_clipping");
+        status.Text = " ";
+        Height = grid.GetPreferredSize(new Size(Width, 0)).Height;
     }
 
     public void Open()
@@ -173,7 +189,6 @@ sealed class LevelPanel : UserControl
     {
         var m = MicMute.Enabled;
         mute.Text = m ? T("unmute") : T("mute");
-        mute.Location = new Point(Width - 12 - mute.Width, 2);
     }
 
     void ReadVolume(MMDevice? d)
@@ -331,15 +346,16 @@ sealed class LevelPanel : UserControl
         protected override void OnPaint(PaintEventArgs e)
         {
             var g = e.Graphics;
-            int labelW = 64;
+            int labelW = Math.Max(TextRenderer.MeasureText(T("you"), Font).Width, TextRenderer.MeasureText(T("others"), Font).Width) + 10;
+            int rowH = Height / 2, barH = Math.Max(8, rowH / 2);
             void Meter(string label, (double rms, double peak)? v, int y)
             {
-                TextRenderer.DrawText(g, label, Font, new Point(0, y - 2), ForeColor);
-                var r = new Rectangle(labelW, y, Width - labelW - 2, 12);
+                TextRenderer.DrawText(g, label, Font, new Rectangle(0, y, labelW, rowH), ForeColor, TextFormatFlags.VerticalCenter);
+                var r = new Rectangle(labelW, y + (rowH - barH) / 2, Width - labelW - 2, barH);
                 using (var bg = new SolidBrush(Color.FromArgb(40, 128, 128, 128))) g.FillRectangle(bg, r);
                 if (v == null)
                 {
-                    TextRenderer.DrawText(g, T("only_while_recording"), Font, new Point(labelW + 4, y - 2), SystemColors.GrayText);
+                    TextRenderer.DrawText(g, T("only_while_recording"), Font, new Rectangle(labelW + 4, y, Width - labelW, rowH), SystemColors.GrayText, TextFormatFlags.VerticalCenter);
                     return;
                 }
                 var f = Frac(v.Value.rms);
@@ -348,8 +364,8 @@ sealed class LevelPanel : UserControl
                 var px = r.X + r.Width * Frac(v.Value.peak);
                 using (var p = new Pen(ForeColor, 2)) g.DrawLine(p, px, r.Y, px, r.Bottom);
             }
-            Meter(T("you"), mic, 6);
-            Meter(T("others"), recording ? sys ?? (-120, -120) : null, 26);
+            Meter(T("you"), mic, 0);
+            Meter(T("others"), recording ? sys ?? (-120, -120) : null, rowH);
         }
     }
 }
@@ -470,7 +486,7 @@ sealed class CallPrompt : Form
         Font = SystemFonts.MessageBoxFont;
         AutoSize = true; AutoSizeMode = AutoSizeMode.GrowAndShrink;
         var row = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Padding = new Padding(12) };
-        row.Controls.Add(new PictureBox { Image = Icons.Glyph(40, Color.FromArgb(0xE5, 0x39, 0x35), null), Size = new Size(44, 44) });
+        row.Controls.Add(new PictureBox { Image = Icons.AppBitmap(40), Size = new Size(44, 44) });
         var col = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false };
         col.Controls.Add(new Label { Text = title, AutoSize = true, MaximumSize = new Size(280, 0), Font = new Font(Font, FontStyle.Bold) });
         if (subtitle.Length > 0) col.Controls.Add(new Label { Text = subtitle, AutoSize = true, MaximumSize = new Size(280, 0), ForeColor = SystemColors.GrayText });

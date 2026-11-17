@@ -1,9 +1,8 @@
 """Build the Windows zip: MeetRec\\ with the tray app, the recorder, meet.py, the locales and an
-embedded Python (no Python install needed). Runs on Windows (CI) after `dotnet publish` of windows/app.
+embedded Python (no Python install needed). Runs on Windows (CI) after `dotnet publish` of windows/app
+and windows/capture into the same folder (they share the .NET runtime files there).
 
-    python windows/package.py <app_publish_dir> <out_dir>
-
-MeetRec.exe is also the recorder (MeetRec.exe --capture), so there is one .NET runtime in the zip.
+    python windows/package.py <publish_dir> <out_dir>
 
 ffmpeg, whisper.cpp and the models are not in the zip: the setup in the app downloads them.
 """
@@ -20,12 +19,16 @@ stage = out / "MeetRec"
 shutil.rmtree(stage, ignore_errors=True)
 stage.mkdir(parents=True)
 
-shutil.copy2(app_pub / "MeetRec.exe", stage)
+# MeetRec.exe, meetrec-capture.exe and the .NET runtime they share (no debug symbols)
+for f in app_pub.iterdir():
+    if f.suffix.lower() == ".pdb":
+        continue
+    (shutil.copytree if f.is_dir() else shutil.copy2)(f, stage / f.name)
 for f in ("meet.py", "VERSION", "LICENSE", "CHANGELOG.md"):
     shutil.copy2(root / f, stage)
 shutil.copytree(root / "locales", stage / "locales")
 # command line: meet.cmd next to the app (the setup can add this folder to PATH)
-(stage / "meet.cmd").write_text('@echo off\r\nset "MEETREC_CAPTURE=%~dp0MeetRec.exe"\r\n'
+(stage / "meet.cmd").write_text('@echo off\r\nset "MEETREC_CAPTURE=%~dp0meetrec-capture.exe"\r\n'
                                 '"%~dp0python\\python.exe" "%~dp0meet.py" %*\r\n', encoding="ascii")
 (stage / "README.txt").write_text(
     "MeetRec for Windows\r\n\r\n"

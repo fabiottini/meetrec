@@ -25,6 +25,8 @@ sealed class TrayApp : ApplicationContext
     public readonly LevelPanel Levels;
     readonly ToolStripControlHost levelHost;
     DateTime lastMuteTick = DateTime.MinValue;
+    ToolStripMenuItem? headerItem;                    // "Recording for 12:34": kept current while the menu is open
+    readonly System.Windows.Forms.Timer menuTimer = new() { Interval = 500 };
 
     public TrayApp(bool show = true)
     {
@@ -34,8 +36,14 @@ sealed class TrayApp : ApplicationContext
         Levels = new LevelPanel(this);
         levelHost = new ToolStripControlHost(Levels) { AutoSize = false, Size = Levels.Size, Margin = Padding.Empty, Padding = Padding.Empty };
         Levels.OnMuteToggled = ToggleMute;
-        Menu.Opened += (_, _) => Levels.Open();
-        Menu.Closed += (_, _) => Levels.Close();
+        Menu.Opened += (_, _) => { Levels.Open(); menuTimer.Start(); };
+        Menu.Closed += (_, _) => { Levels.Close(); menuTimer.Stop(); };
+        menuTimer.Tick += (_, _) =>
+        {
+            if (headerItem == null) return;
+            var c = Cur();
+            if (c != null) headerItem.Text = HeaderText(c);
+        };
         Tray.ContextMenuStrip = Menu;
         Tray.Text = "MeetRec";
         // left click opens the same menu (right click does it by itself)
@@ -112,12 +120,12 @@ sealed class TrayApp : ApplicationContext
         }
         else if (Processing)
         {
-            key = "proc"; make = () => Icons.Glyph(size, null, null);
+            key = $"proc-{muted}"; make = () => Icons.Idle(size, true, muted);
             tip = "MeetRec – " + T("processing") + ProcessingStep;
         }
         else
         {
-            key = $"idle-{muted}"; make = () => Icons.Glyph(size, null, null, muted);
+            key = $"idle-{muted}"; make = () => Icons.Idle(size, false, muted);
             tip = "MeetRec – " + T("ready");
         }
         key += Icons.DarkTaskbar() ? "-d" : "-l";
@@ -160,8 +168,13 @@ sealed class TrayApp : ApplicationContext
         return i;
     }
 
+    static string HeaderText(Current c) =>
+        c.Alive ? T("recording_for") + Elapsed(c.Start) + (c.Title != null ? " – " + Short(c.Title, 30) : "")
+                : T("the_recorder_stopped_stop_to_save");
+
     public void BuildMenu()
     {
+        headerItem = null;
         Menu.Items.Clear();
         var m = Menu.Items;
         var c = Cur();
@@ -175,8 +188,7 @@ sealed class TrayApp : ApplicationContext
         m.Add(new ToolStripSeparator());
         if (c != null)
         {
-            var head = T("recording_for") + Elapsed(c.Start);
-            Item(m, c.Alive ? head + (c.Title != null ? " – " + Short(c.Title, 30) : "") : T("the_recorder_stopped_stop_to_save"), null, max: 80);
+            headerItem = Item(m, HeaderText(c), null, max: 80);
             Item(m, T("stop_and_process"), StopAndProcess, hk);
             Item(m, T("stop_without_processing"), StopOnly);
             Item(m, T("stop_and_discard"), StopAndDiscard);

@@ -31,23 +31,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           python windows/ci_ffmpeg.py
-          python -c @"
-          import json, os, urllib.request, zipfile, pathlib
-          h = {'Authorization': 'Bearer ' + os.environ['GH_TOKEN'], 'User-Agent': 'meetrec-ci'}
-          req = urllib.request.Request('https://api.github.com/repos/ggml-org/whisper.cpp/releases?per_page=20', headers=h)
-          rels = json.load(urllib.request.urlopen(req))
-          rel = next(r for r in rels if any(a['name'] == 'whisper-bin-x64.zip' for a in r['assets']))
-          url = next(a['browser_download_url'] for a in rel['assets'] if a['name'] == 'whisper-bin-x64.zip')
-          print('whisper.cpp release', rel['tag_name'])
-          urllib.request.urlretrieve(url, 'whisper.zip')
-          zipfile.ZipFile('whisper.zip').extractall('whisper')
-          cli = next(pathlib.Path('whisper').rglob('whisper-cli.exe'))
-          open(os.environ['GITHUB_ENV'], 'a').write(f'WHISPER={cli.resolve()}\n')
-          os.makedirs('models', exist_ok=True)
-          for u in ['https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin',
-                    'https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin']:
-              urllib.request.urlretrieve(u, 'models/' + u.rsplit('/', 1)[1])
-          "@
+          python windows/ci_whisper.py
 
       - name: Test audio from Windows speech synthesis
         shell: pwsh
@@ -115,9 +99,11 @@ jobs:
         with:
           python-version: '3.14'
 
-      - name: Build the tray app (recorder included)
+      - name: Build the tray app and the recorder (same folder, shared runtime)
         shell: pwsh
-        run: dotnet publish windows/app/MeetRec.csproj -c Release -o pub/app
+        run: |
+          dotnet publish windows/app/MeetRec.csproj -c Release -o pub/app
+          dotnet publish windows/capture/MeetRecCapture.csproj -c Release -o pub/app
 
       - name: No known vulnerable NuGet packages (direct and transitive)
         shell: pwsh
@@ -132,9 +118,21 @@ jobs:
           python windows/ci_ffmpeg.py
           python windows/package.py pub/app dist-win
 
-      - name: Self test from the unzipped package, images of the UI
+      - name: whisper.cpp, models and a test recording (for the app flow test)
         shell: pwsh
-        run: python windows/test_app.py dist-win/MeetRec-windows.zip ui
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python windows/ci_whisper.py
+          Add-Type -AssemblyName System.Speech
+          $s = New-Object System.Speech.Synthesis.SpeechSynthesizer
+          $s.SetOutputToWaveFile("$PWD\call.wav")
+          $s.Speak("Let's start with the release. We are ready for Thursday. The budget stays the same.")
+          $s.Dispose()
+
+      - name: Self test from the unzipped package, the app flow end to end, images of the UI
+        shell: pwsh
+        run: python windows/test_app.py dist-win/MeetRec-windows.zip ui --flow call.wav --whisper "$env:WHISPER" --model models/ggml-tiny.bin --vad models/ggml-silero-v6.2.0.bin
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()

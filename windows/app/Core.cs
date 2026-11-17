@@ -41,8 +41,8 @@ static class Paths
 
     /// meet.py next to the exe (the zip), or MEETREC_SCRIPT (dev runs)
     public static string Script => Environment.GetEnvironmentVariable("MEETREC_SCRIPT") ?? Path.Combine(AppDir, "meet.py");
-    /// the recorder is MeetRec.exe itself (--capture)
-    public static string Capture => Environment.ProcessPath ?? Path.Combine(AppDir, "MeetRec.exe");
+    /// the recorder, a separate exe next to MeetRec.exe (windows/capture)
+    public static string Capture => Path.Combine(AppDir, "meetrec-capture.exe");
 
     /// the embedded Python in the zip; otherwise the py launcher or python on PATH
     public static string? Python()
@@ -227,10 +227,15 @@ static class Meet
             {
                 if (Interlocked.Decrement(ref open) == 0)
                 {
-                    p.WaitForExit();
-                    var code = p.ExitCode;
-                    string all; lock (output) all = output.ToString();
-                    Post(() => done(code, all));
+                    // Not here: WaitForExit() waits for the output readers to finish, and this code runs
+                    // inside a reader, so it would wait for itself forever (the callbacks never came).
+                    Task.Run(() =>
+                    {
+                        p.WaitForExit();
+                        var code = p.ExitCode;
+                        string all; lock (output) all = output.ToString();
+                        Post(() => done(code, all));
+                    });
                 }
                 return;
             }

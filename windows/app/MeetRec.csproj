@@ -10,17 +10,22 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <!-- self-contained in a folder, NOT single-file: a single-file exe unpacks libraries into %TEMP% and
+         loads them at start, which antivirus heuristics report as a dropper (Avira: Drop.Win64...) -->
     <SelfContained>true</SelfContained>
-    <PublishSingleFile>true</PublishSingleFile>
-    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
-    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <PublishSingleFile>false</PublishSingleFile>
+    <!-- shown in the file properties; unsigned files without them look more suspicious to antivirus heuristics -->
+    <Product>MeetRec</Product>
+    <Company>MeetRec (open source, github.com/fabiottini/meetrec)</Company>
+    <Copyright>MIT License, Fabio Lucattini</Copyright>
+    <FileDescription>MeetRec: records and transcribes meetings locally</FileDescription>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <StartupObject>MeetRec.Program</StartupObject>
+    <ApplicationIcon>MeetRec.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- the recorder is built into MeetRec.exe (MeetRec.exe with the capture option): one .NET runtime in the zip -->
-    <Compile Include="..\capture\Program.cs" Link="Capture\Recorder.cs" />
+    <EmbeddedResource Include="MeetRec.ico" LogicalName="MeetRec.ico" />
   </ItemGroup>
 
   <ItemGroup>
