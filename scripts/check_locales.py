@@ -6,7 +6,7 @@ from pathlib import Path
 
 used = set()
 for f in [*Path("menubar").glob("*.swift"), *Path("windows/app").glob("*.cs")]:
-    text = f.read_text()
+    text = f.read_text(encoding="utf-8")
     used |= set(re.findall(r'T\("([a-z_0-9]+)"', text))
     used |= set(re.findall(r'"(g\d_(?:title|text))"', text))       # Google guide steps
     used |= set(re.findall(r'"(voice_(?:none|p\d))"', text))       # voice profile names
@@ -14,7 +14,7 @@ for f in [*Path("menubar").glob("*.swift"), *Path("windows/app").glob("*.cs")]:
     used |= set(re.findall(r'"(fmt_[a-z]+)"', text))                # output format names
     used |= set(re.findall(r'"(m\d_(?:title|text))"', text))       # Microsoft guide steps
 
-locales = {f.stem: set(json.loads(f.read_text())) for f in Path("locales").glob("*.json")}
+locales = {f.stem: set(json.loads(f.read_text(encoding="utf-8"))) for f in Path("locales").glob("*.json")}
 ok = True
 for code, keys in sorted(locales.items()):
     missing = sorted(used - keys)

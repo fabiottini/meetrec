@@ -64,6 +64,8 @@ jobs:
           ffmpeg -version | Select-Object -First 1
           & $env:WHISPER --help 2>&1 | Select-Object -First 1
           python scripts/test_core.py call.wav --whisper "$env:WHISPER" --model models/ggml-tiny.bin --vad models/ggml-silero-v6.2.0.bin --word release
+          python scripts/check_config_example.py
+          python scripts/check_locales.py
 
   recorder:
     runs-on: windows-latest

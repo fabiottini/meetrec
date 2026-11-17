@@ -1,15 +1,42 @@
 {
-  "_comment": "MeetRec settings: copy this file to ~/.config/meetrec/config.json (macOS) or %APPDATA%\\MeetRec\\config.json (Windows). meet config keys lists every setting.",
+  "_comment": "MeetRec settings. Keys starting with _ are notes for you and are ignored. meet config keys lists every setting; meet config check validates this file.",
+
   "output_dir": "~/Documents/MeetRec",
-  "output_formats": ["md", "json"],
+  "output_formats": ["md", "json", "srt"],
   "output_layout": "month",
-  "md_style": "plain",
+  "md_style": "obsidian",
+  "vault": "~/Obsidian/Notes",
+  "people_dir": "People",
+  "context": "work",
+
   "recordings_dir": "~/Recordings/meetings",
-  "language": "it",
+  "language": "en",
+  "ui_language": "en",
   "me": "Me",
-  "others_label": "Altri",
+  "others_label": "Others",
+
+  "mic_id": null,
+  "auto_gain": true,
+  "record_system": true,
+  "transcript_mode": "separate",
+  "voice_profile": "none",
+  "voice_profile_scope": "mine",
+  "after_process_audio": "ask",
+  "keep_raw": false,
+  "keep_tracks": false,
+  "call_prompt": true,
+
   "summary": true,
   "ai_provider": "claude-code",
-  "transcript_mode": "separate",
-  "after_process_audio": "ask"
+  "ai_model": "",
+  "ai_base_url": "",
+
+  "timezone": "Europe/Rome",
+  "ms_client_id": "00000000-0000-0000-0000-000000000000",
+  "calendar_accounts": [
+    {"id": "microsoft-1", "provider": "microsoft", "label": "you@company.com", "authority": "common",
+     "scopes": "Calendars.Read Calendars.Read.Shared offline_access openid profile"},
+    {"id": "google-1", "provider": "google", "label": "you@gmail.com"},
+    {"id": "macos", "provider": "macos", "label": "macOS Calendar"}
+  ]
 }

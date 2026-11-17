@@ -76,6 +76,71 @@ when you change something. There is no hidden database.
 | Windows | `%APPDATA%\MeetRec\config.json` | Settings > System > **Show the file**, or `explorer /select,"%APPDATA%\MeetRec\config.json"` |
 | anywhere | `meet config path` prints it | |
 
+**What it looks like.** A complete example, also in [`config.example.json`](config.example.json)
+(the same file on macOS and Windows):
+
+<!-- config-example:start -->
+```json
+{
+  "_comment": "MeetRec settings. Keys starting with _ are notes for you and are ignored. meet config keys lists every setting; meet config check validates this file.",
+
+  "output_dir": "~/Documents/MeetRec",
+  "output_formats": ["md", "json", "srt"],
+  "output_layout": "month",
+  "md_style": "obsidian",
+  "vault": "~/Obsidian/Notes",
+  "people_dir": "People",
+  "context": "work",
+
+  "recordings_dir": "~/Recordings/meetings",
+  "language": "en",
+  "ui_language": "en",
+  "me": "Me",
+  "others_label": "Others",
+
+  "mic_id": null,
+  "auto_gain": true,
+  "record_system": true,
+  "transcript_mode": "separate",
+  "voice_profile": "none",
+  "voice_profile_scope": "mine",
+  "after_process_audio": "ask",
+  "keep_raw": false,
+  "keep_tracks": false,
+  "call_prompt": true,
+
+  "summary": true,
+  "ai_provider": "claude-code",
+  "ai_model": "",
+  "ai_base_url": "",
+
+  "timezone": "Europe/Rome",
+  "ms_client_id": "00000000-0000-0000-0000-000000000000",
+  "calendar_accounts": [
+    {"id": "microsoft-1", "provider": "microsoft", "label": "you@company.com", "authority": "common",
+     "scopes": "Calendars.Read Calendars.Read.Shared offline_access openid profile"},
+    {"id": "google-1", "provider": "google", "label": "you@gmail.com"},
+    {"id": "macos", "provider": "macos", "label": "macOS Calendar"}
+  ]
+}
+```
+<!-- config-example:end -->
+
+| Group | Keys |
+|---|---|
+| Where notes go and how | `output_dir`, `output_formats` (`md` `txt` `json` `srt` `vtt`), `output_layout` (`month` / `flat`), `md_style` (`plain` / `obsidian`); for Obsidian also `vault`, `people_dir`, `context` |
+| Recording | `recordings_dir`, `language` (meeting: `it` / `en`), `ui_language` (menus), `me`, `others_label`, `mic_id` (`null` = system default), `auto_gain`, `record_system`, `transcript_mode`, `voice_profile`, `voice_profile_scope`, `after_process_audio` (`ask` / `keep` / `delete`), `keep_raw`, `keep_tracks`, `call_prompt` |
+| AI | `summary`, `ai_provider`, `ai_model`, `ai_base_url` (see [AI for the summary](#ai-for-the-summary)) |
+| Calendars | `calendar_accounts` (written by Setup / `meet account add`), `ms_client_id`, `timezone` |
+
+**You do not need every key.** Missing keys take the default, so a minimal file is fine:
+
+```json
+{ "output_dir": "~/Notes/Meetings", "output_formats": ["md", "txt"], "language": "en" }
+```
+
+All keys, types and allowed values: `meet config keys` (the table under [Configuration](#configuration)).
+
 The same file works on macOS and on Windows: paths are saved as `~/…` (your home folder) and may use
 environment variables (`$HOME`, `%USERPROFILE%`). It is readable and editable by hand, and
 `meet config check` tells you if something is wrong.
@@ -664,7 +729,8 @@ meet config use ~/Dropbox/meetrec.json # keep the settings there from now on (ap
 meet --config ~/test.json status       # any command with another file, this time only
 ```
 
-Settings > System > **Configuration file** shows the same file. Example:
+Settings > System > **Configuration file** shows the same file. A complete example is under
+[Your settings in one file](#your-settings-in-one-file-backup-move-replicate) and in
 [`config.example.json`](config.example.json).
 
 | Key | Default | Notes |
