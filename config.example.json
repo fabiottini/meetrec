@@ -1,13 +1,15 @@
 {
-  "vault": "/Users/you/Obsidian/MyVault",
-  "meetings_dir": "Meetings",
-  "people_dir": "People",
-  "context": "work",
-  "recordings_dir": "/Users/you/Recordings/meetings",
+  "_comment": "MeetRec settings: copy this file to ~/.config/meetrec/config.json (macOS) or %APPDATA%\\MeetRec\\config.json (Windows). meet config keys lists every setting.",
+  "output_dir": "~/Documents/MeetRec",
+  "output_formats": ["md", "json"],
+  "output_layout": "month",
+  "md_style": "plain",
+  "recordings_dir": "~/Recordings/meetings",
   "language": "it",
   "me": "Me",
   "others_label": "Altri",
-  "mic_id": null,
   "summary": true,
-  "keep_raw": false
+  "ai_provider": "claude-code",
+  "transcript_mode": "separate",
+  "after_process_audio": "ask"
 }

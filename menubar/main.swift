@@ -149,10 +149,28 @@ func notify(_ title: String, _ body: String) {
     try? p.run()
 }
 
-func openObsidian(_ notePath: String) {
-    var c = URLComponents(string: "obsidian://open")!
-    c.queryItems = [URLQueryItem(name: "path", value: notePath)]
-    if let u = c.url { NSWorkspace.shared.open(u) }
+/// ~ and $VARS in paths from config.json (the same file works on every computer)
+func expandPath(_ p: String) -> String {
+    var s = (p as NSString).expandingTildeInPath
+    for (k, v) in ProcessInfo.processInfo.environment { s = s.replacingOccurrences(of: "$\(k)", with: v) }
+    return s
+}
+
+/// paths under your home are saved as ~/…, so config.json can be copied to another computer
+func portablePath(_ p: String) -> String {
+    let full = expandPath(p)
+    return full.hasPrefix(home + "/") ? "~" + full.dropFirst(home.count) : full
+}
+
+/// the note: in Obsidian when the Markdown is in Obsidian style, otherwise with the default app
+func openNote(_ notePath: String) {
+    let cfg = Config.shared.value
+    if (cfg["md_style"] as? String) == "obsidian", notePath.hasSuffix(".md") {
+        var c = URLComponents(string: "obsidian://open")!
+        c.queryItems = [URLQueryItem(name: "path", value: notePath)]
+        if let u = c.url { NSWorkspace.shared.open(u); return }
+    }
+    NSWorkspace.shared.open(URL(fileURLWithPath: notePath))
 }
 
 // MARK: - global shortcut Control-Option-Command-R: start, or stop and process, from any app
@@ -210,6 +228,11 @@ final class Config {
     }
 }
 
+// MARK: - output formats (meet.py writes them)
+
+let outputFormatList: [(String, String)] = [("md", "fmt_md"), ("txt", "fmt_txt"), ("json", "fmt_json"),
+                                            ("srt", "fmt_srt"), ("vtt", "fmt_vtt")]
+
 // MARK: - AI providers for the summary and the instructions (meet.py does the work)
 
 let aiProviders: [(String, String)] = [("claude-code", "ai_p_claude_code"), ("codex", "ai_p_codex"),
@@ -236,7 +259,10 @@ func voiceTest(_ profile: String) {
 final class Settings: ObservableObject {
     @Published var recordingsDir = ""
     @Published var vault = ""
-    @Published var meetingsDir = ""
+    @Published var outputDir = ""
+    @Published var outputFormats: Set<String> = ["md"]
+    @Published var outputLayout = "month"
+    @Published var mdStyle = "plain"
     @Published var peopleDir = ""
     @Published var context = ""
     @Published var language = "it"
@@ -272,8 +298,13 @@ final class Settings: ObservableObject {
         raw = (try? JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: configFile)))) as? [String: Any] ?? [:]
         recordingsDir = raw["recordings_dir"] as? String ?? "\(home)/Recordings/meetings"
         vault = raw["vault"] as? String ?? ""
-        meetingsDir = raw["meetings_dir"] as? String ?? ""
-        peopleDir = raw["people_dir"] as? String ?? ""
+        // configs from before 1.9 had <vault>/<meetings_dir>; meet migrates them on its first run
+        outputDir = raw["output_dir"] as? String
+            ?? (vault.isEmpty ? "~/Documents/MeetRec" : vault + "/" + (raw["meetings_dir"] as? String ?? "Meetings"))
+        outputFormats = Set(raw["output_formats"] as? [String] ?? ["md"])
+        outputLayout = raw["output_layout"] as? String ?? "month"
+        mdStyle = raw["md_style"] as? String ?? (raw["output_dir"] == nil && !vault.isEmpty ? "obsidian" : "plain")
+        peopleDir = raw["people_dir"] as? String ?? "People"
         context = raw["context"] as? String ?? "work"
         language = raw["language"] as? String ?? "it"
         I18n.reload()                     // pick up edited/new JSON files
@@ -316,9 +347,13 @@ final class Settings: ObservableObject {
     }
 
     func save() {
-        raw["recordings_dir"] = recordingsDir
-        raw["vault"] = vault
-        raw["meetings_dir"] = meetingsDir
+        raw["recordings_dir"] = portablePath(recordingsDir)
+        raw["vault"] = vault.isEmpty ? "" : portablePath(vault)
+        raw["output_dir"] = portablePath(outputDir)
+        raw["output_formats"] = outputFormatList.filter { outputFormats.contains($0.0) }.map { $0.0 }
+        if (raw["output_formats"] as? [String])?.isEmpty ?? true { raw["output_formats"] = ["md"] }
+        raw["output_layout"] = outputLayout
+        raw["md_style"] = mdStyle
         raw["people_dir"] = peopleDir
         raw["context"] = context
         raw["language"] = language
@@ -338,7 +373,7 @@ final class Settings: ObservableObject {
         raw["ai_base_url"] = aiBaseURL.trimmingCharacters(in: .whitespaces)
         if aiProvider == "command" { raw["summary_cmd"] = aiCommand.trimmingCharacters(in: .whitespaces) }
         if let d = try? JSONSerialization.data(withJSONObject: raw, options: [.prettyPrinted, .sortedKeys]) {
-            try? FileManager.default.createDirectory(atPath: "\(home)/.config/meetrec", withIntermediateDirectories: true)
+            try? FileManager.default.createDirectory(atPath: (configFile as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
             try? d.write(to: URL(fileURLWithPath: configFile), options: .atomic)
             saved = true
         }
@@ -402,9 +437,9 @@ struct PathField: View {
             Button(T("choose")) {
                 let p = NSOpenPanel()
                 p.canChooseDirectories = true; p.canChooseFiles = false; p.canCreateDirectories = true
-                p.directoryURL = URL(fileURLWithPath: path)
+                p.directoryURL = URL(fileURLWithPath: expandPath(path))
                 NSApp.activate(ignoringOtherApps: true)
-                if p.runModal() == .OK, let u = p.url { path = u.path }
+                if p.runModal() == .OK, let u = p.url { path = portablePath(u.path) }
             }
         }
     }
@@ -461,11 +496,30 @@ struct SettingsView: View {
                     Text(T("after_audio_delete")).tag("delete")
                 }
             }
-            Section("Obsidian") {
-                PathField(label: "Vault", path: $s.vault)
-                TextField(T("meetings_folder_relative_to_vault"), text: $s.meetingsDir)
-                TextField(T("people_folder_relative_to_vault"), text: $s.peopleDir)
-                TextField(T("frontmatter_context"), text: $s.context)
+            Section(T("output_section")) {
+                PathField(label: T("output_folder"), path: $s.outputDir)
+                Text(T("output_hint")).font(.caption).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(T("output_formats"))
+                    HStack(spacing: 14) {
+                        ForEach(outputFormatList, id: \.0) { f in
+                            Toggle(T(f.1), isOn: Binding(get: { s.outputFormats.contains(f.0) },
+                                                         set: { on in if on { s.outputFormats.insert(f.0) } else { s.outputFormats.remove(f.0) } }))
+                                .toggleStyle(.checkbox)
+                        }
+                    }
+                }
+                Picker(T("output_layout"), selection: $s.outputLayout) {
+                    Text(T("layout_month")).tag("month"); Text(T("layout_flat")).tag("flat")
+                }
+                Picker(T("md_style"), selection: $s.mdStyle) {
+                    Text(T("md_plain")).tag("plain"); Text(T("md_obsidian")).tag("obsidian")
+                }
+                if s.mdStyle == "obsidian" {
+                    PathField(label: T("obsidian_vault"), path: $s.vault)
+                    TextField(T("people_folder_relative_to_vault"), text: $s.peopleDir)
+                    TextField(T("frontmatter_context"), text: $s.context)
+                }
             }
             Section(T("ai_section")) {
                 Toggle(T("ai_summary_toggle"), isOn: $s.summary)
@@ -500,6 +554,14 @@ struct SettingsView: View {
             }
             Section(T("system")) {
                 Toggle(T("open_meetrec_at_login"), isOn: Binding(get: { s.launchAtLogin }, set: { s.setLaunchAtLogin($0) }))
+                HStack {
+                    Text(T("config_file")); Spacer()
+                    Text((configFile as NSString).abbreviatingWithTildeInPath).font(.caption).textSelection(.enabled)
+                    Button(T("config_reveal")) {
+                        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: configFile)])
+                    }
+                }
+                Text(T("config_hint")).font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Button(T("microphone_permission")) {
                         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!)
@@ -1148,7 +1210,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
 
     @objc func openNoteOf(_ sender: NSMenuItem) {
-        if let n = sender.representedObject as? String { openObsidian(n) }
+        if let n = sender.representedObject as? String { openNote(n) }
     }
 
     /// a processed recording: cut parts in the editor; transcript and note follow (no new transcription)
@@ -1340,11 +1402,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         }
     }
 
-    @objc func openLastNote() { if let n = lastNote { openObsidian(n) } }
+    @objc func openLastNote() { if let n = lastNote { openNote(n) } }
     @objc func openRecordings() {
         settings.load()
-        try? FileManager.default.createDirectory(atPath: settings.recordingsDir, withIntermediateDirectories: true)
-        NSWorkspace.shared.open(URL(fileURLWithPath: settings.recordingsDir))
+        let dir = expandPath(settings.recordingsDir)
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(URL(fileURLWithPath: dir))
     }
     @objc func openLog() {
         appendLog("")
@@ -1575,7 +1638,7 @@ func renderDocs(_ dir: String, _ d: AppDelegate) {
         Check(id: "mic", title: T("setup_mic_permission"), detail: "OK", ok: true, required: true, action: nil),
         Check(id: "screen", title: T("setup_screen_permission"), detail: T("setup_screen_permission_detail"),
               ok: false, required: true, action: T("setup_allow")),
-        Check(id: "vault", title: T("setup_vault"), detail: "/Users/you/Obsidian/Notes", ok: true, required: true, action: T("setup_choose")),
+        Check(id: "output", title: T("setup_output"), detail: "~/Documents/MeetRec · md, json", ok: true, required: true, action: T("setup_choose")),
         Check(id: "calendars", title: T("cal_title"), detail: T("cal_count", ["n": "2"]), ok: true, required: false, action: nil),
         Check(id: "ai", title: T("setup_ai"), detail: T("ai_p_claude_code") + " · sonnet", ok: true, required: false, action: nil),
         Check(id: "cli", title: T("setup_cli"), detail: T("setup_cli_detail"), ok: false, required: false, action: T("setup_install")),

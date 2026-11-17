@@ -279,8 +279,33 @@ static class Shell
         catch (Exception e) { Log.Append($"[app] cannot open {target}: {e.Message}\n"); }
     }
 
-    public static void OpenNote(string path) =>
-        Open("obsidian://open?path=" + Uri.EscapeDataString(path));
+    /// the note: in Obsidian when the Markdown is in Obsidian style, otherwise with the default app
+    public static void OpenNote(string path)
+    {
+        if (Config.Str("md_style", "plain") == "obsidian" && path.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
+            Open("obsidian://open?path=" + Uri.EscapeDataString(path));
+        else Open(path);
+    }
+
+    static readonly string Home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+
+    /// ~ and %VARS% / $VARS in paths from config.json (the same file works on every computer)
+    public static string ExpandPath(string p)
+    {
+        if (string.IsNullOrEmpty(p)) return p;
+        if (p == "~" || p.StartsWith("~/") || p.StartsWith("~\\")) p = Home + p[1..];
+        p = Environment.ExpandEnvironmentVariables(p);
+        p = System.Text.RegularExpressions.Regex.Replace(p, @"\$([A-Za-z_][A-Za-z0-9_]*)", m => Environment.GetEnvironmentVariable(m.Groups[1].Value) ?? m.Value);
+        return Path.GetFullPath(p.Replace('/', '\\'));
+    }
+
+    /// paths under your home are saved as ~/…, so config.json can be copied to another computer
+    public static string PortablePath(string p)
+    {
+        if (string.IsNullOrWhiteSpace(p)) return "";
+        var full = ExpandPath(p.Trim());
+        return full.StartsWith(Home + "\\", StringComparison.OrdinalIgnoreCase) ? "~/" + full[(Home.Length + 1)..].Replace('\\', '/') : full;
+    }
 
     public static bool PidAlive(int pid)
     {

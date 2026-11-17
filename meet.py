@@ -62,6 +62,9 @@ else:
     STATE_DIR = HOME / ".local" / "state" / "meetrec"
 if os.environ.get("MEETREC_CONF_DIR"):        # tests: config, tokens and keys in a temporary folder
     CONF_DIR = Path(os.environ["MEETREC_CONF_DIR"])
+# the one configuration file, read at startup by meet, the macOS app and the Windows app.
+# MEETREC_CONFIG_FILE points to another one (e.g. a file you keep in a synced folder).
+CONFIG_FILE = Path(os.environ["MEETREC_CONFIG_FILE"]).expanduser() if os.environ.get("MEETREC_CONFIG_FILE") else CONF_DIR / "config.json"
 CURRENT = STATE_DIR / "current.json"
 VIBE_SUPPORT = HOME / "Library/Application Support/github.com.thewh1teagle.vibe"
 # models (and on Windows the tools) downloaded by the app setup
@@ -253,9 +256,14 @@ def capture_cmd():
 
 DEFAULTS = {
     "recordings_dir": str(HOME / "Recordings" / "meetings"),
-    "vault": "",                                       # Obsidian vault (required)
-    "meetings_dir": "Meetings",                        # relative to the vault, + /YYYY-MM/
-    "people_dir": "People",                            # person notes, linked by nome_cognome.md
+    # where the notes and transcripts go, in which formats (md, txt, json, srt, vtt)
+    "output_dir": str(HOME / "Documents" / "MeetRec"),
+    "output_formats": ["md"],
+    "output_layout": "month",                          # month: <output_dir>/YYYY-MM/; flat: all in <output_dir>
+    "md_style": "plain",                               # plain Markdown, or obsidian: frontmatter, callouts, [[people]] links
+    "vault": "",                                       # Obsidian vault root (optional): where people_dir is looked up
+    "meetings_dir": "Meetings",                        # old configs: output_dir was <vault>/<meetings_dir>
+    "people_dir": "People",                            # obsidian style: person notes, linked by nome_cognome.md
     "context": "work",                                 # frontmatter `context:`
     "language": "it",
     "me": "Me",                                        # label for the mic track
@@ -275,6 +283,10 @@ DEFAULTS = {
     "auto_gain": True,                                 # lower the mic input volume when it clips
     "summary": True,
     "summary_cmd": ["claude", "-p", "--model", "sonnet"],
+    "ai_provider": "",                                 # empty = claude-code (or command, for old custom summary_cmd)
+    "ai_model": "",
+    "ai_base_url": "",
+    "call_prompt": True,
     "keep_raw": False,
     "keep_tracks": False,                              # keep mic.m4a/system.m4a after processing (mix.m4a is always kept)
     "record_system": True,                             # False: record only my voice (no system audio)
@@ -289,25 +301,114 @@ DEFAULTS = {
 }
 
 
-USER_KEYS = ["recordings_dir", "vault", "meetings_dir", "people_dir", "context", "language", "me",
-             "others_label", "mic_id", "auto_gain", "summary", "keep_raw", "keep_tracks", "record_system",
-             "transcript_mode", "voice_profile", "voice_profile_scope", "after_process_audio"]
+# Every setting: (type, allowed values, what it is). `meet config keys` prints this table;
+# `meet config set` and `meet config check` validate against it.
+SCHEMA = {
+    "output_dir": ("path", None, "folder for notes and transcripts (can be inside an Obsidian vault)"),
+    "output_formats": ("list", ["md", "txt", "json", "srt", "vtt"], "formats written for each meeting"),
+    "output_layout": ("choice", ["month", "flat"], "month: YYYY-MM subfolders; flat: one folder"),
+    "md_style": ("choice", ["plain", "obsidian"], "obsidian: frontmatter, callouts, [[people]] links"),
+    "vault": ("path", None, "obsidian style: vault root, where people_dir is looked up"),
+    "people_dir": ("str", None, "obsidian style: person notes folder, relative to the vault"),
+    "context": ("str", None, "frontmatter context: (obsidian style)"),
+    "recordings_dir": ("path", None, "folder for the audio"),
+    "language": ("choice", ["it", "en"], "meeting language: transcription and note"),
+    "ui_language": ("str", None, "language of the apps' menus (code of a locales/*.json)"),
+    "me": ("str", None, "label of your microphone track"),
+    "others_label": ("str", None, "label of the other participants"),
+    "mic_id": ("str?", None, "microphone ID (meet mics); empty = system default"),
+    "auto_gain": ("bool", None, "lower the mic volume when it clips"),
+    "record_system": ("bool", None, "false: record only your voice"),
+    "transcript_mode": ("choice", ["separate", "mixed"], "speakers from the two tracks, or one transcript of the mix"),
+    "voice_profile": ("choice", ["none", "p1", "p2", "p3", "p4"], "alter the voice in the saved audio"),
+    "voice_profile_scope": ("choice", ["mine", "all"], "which voices the profile alters"),
+    "after_process_audio": ("choice", ["ask", "keep", "delete"], "audio after a verified transcript"),
+    "keep_raw": ("bool", None, "also keep the raw PCM"),
+    "keep_tracks": ("bool", None, "keep mic.m4a/system.m4a besides the mix"),
+    "call_prompt": ("bool", None, "apps: offer to record when a call starts"),
+    "summary": ("bool", None, "automatic summary with the AI provider"),
+    "ai_provider": ("choice", ["claude-code", "codex", "anthropic", "openai", "openai-compatible", "command", "none"], "AI for summary and instructions"),
+    "ai_model": ("str", None, "model name; empty = provider default"),
+    "ai_base_url": ("str", None, "openai-compatible: service URL ending in /v1"),
+    "summary_cmd": ("str", None, "command provider: program reading the prompt on stdin"),
+    "whisper_threads": ("int", None, "CPU threads for whisper.cpp"),
+    "timezone": ("str", None, "time zone for calendar queries"),
+    "ms_client_id": ("str", None, "your Microsoft app registration (Setup guide)"),
+    "calendar_accounts": ("json", None, "calendar accounts (logins are not in this file)"),
+    "whisper_bin": ("path", None, "whisper-cli (found by itself)"),
+    "whisper_model": ("path", None, "speech model file (found by itself)"),
+    "vad_model": ("path", None, "silence filter model (found by itself)"),
+    "ffmpeg": ("path", None, "ffmpeg (found by itself)"),
+}
+# tied to one computer: left out of `meet config export` (unless --all)
+MACHINE_KEYS = {"mic_id", "whisper_bin", "whisper_model", "vad_model", "ffmpeg", "capture_bin", "vibe_bin", "vibe_model",
+                "whisper_threads"}
+PATH_KEYS = {k for k, v in SCHEMA.items() if v[0] == "path"} | {"capture_bin", "vibe_bin", "vibe_model"}
+USER_KEYS = ["output_dir", "output_formats", "output_layout", "md_style", "recordings_dir", "language", "me",
+             "others_label", "auto_gain", "summary", "record_system", "transcript_mode",
+             "after_process_audio"]
+
+
+def xpath(v):
+    """~ and $VARS / %VARS% in paths, so one config file works on every computer"""
+    return os.path.expandvars(os.path.expanduser(v)) if isinstance(v, str) and v else v
+
+
+def portable_path(p):
+    """store paths under your home as ~/…, so the file can be copied to another computer"""
+    full = Path(xpath(p)).expanduser()
+    try:
+        return "~/" + full.resolve().relative_to(HOME.resolve()).as_posix()
+    except ValueError:
+        return str(full)
+
+
+def read_config_file():
+    try:
+        return json.loads(CONFIG_FILE.read_text())
+    except FileNotFoundError:
+        return {}
+
+
+def write_config_file(cfg):
+    CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = CONFIG_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(cfg, indent=2, ensure_ascii=False, sort_keys=True) + "\n")
+    tmp.replace(CONFIG_FILE)
+
+
+def migrate_config(cfg):
+    """configs from before 1.9: notes went to <vault>/<meetings_dir> in Obsidian style; keep that"""
+    if "output_dir" not in cfg and cfg.get("vault"):
+        cfg["output_dir"] = portable_path(str(Path(xpath(cfg["vault"])) / cfg.get("meetings_dir", "Meetings")))
+        cfg.setdefault("md_style", "obsidian")
+        cfg.setdefault("output_formats", ["md"])
+        cfg.setdefault("output_layout", "month")
+        return True
+    return False
 
 
 def load_conf():
     conf = dict(DEFAULTS)
-    f = CONF_DIR / "config.json"
-    if f.exists():
-        conf.update(json.loads(f.read_text()))
+    if CONFIG_FILE.exists():
+        cfg = json.loads(CONFIG_FILE.read_text())
+        if migrate_config(cfg):
+            write_config_file(cfg)
+        conf.update(cfg)
     else:
-        CONF_DIR.mkdir(parents=True, exist_ok=True)
-        f.write_text(json.dumps({k: DEFAULTS[k] for k in USER_KEYS}, indent=2) + "\n")
+        write_config_file({k: portable_path(DEFAULTS[k]) if k in PATH_KEYS else DEFAULTS[k] for k in USER_KEYS})
     if os.environ.get("MEETREC_CONF"):      # extra overrides, e.g. for tests
-        conf.update(json.loads(Path(os.environ["MEETREC_CONF"]).read_text()))
+        extra = json.loads(Path(os.environ["MEETREC_CONF"]).read_text())
+        migrate_config(extra)
+        conf.update(extra)
+    for k in PATH_KEYS:
+        conf[k] = xpath(conf.get(k))
     # old configs pinned paths that may not exist any more (e.g. repo moved, app bundle): use defaults then
     for k in ("capture_bin", "ffmpeg", "whisper_bin", "whisper_model", "vad_model"):
         if not conf.get(k) or not Path(conf[k]).exists():
             conf[k] = DEFAULTS[k]
+    if isinstance(conf.get("output_formats"), str):
+        conf["output_formats"] = [x.strip() for x in conf["output_formats"].split(",") if x.strip()]
     return conf
 
 
@@ -866,7 +967,7 @@ def accounts():
 
 
 def save_accounts(accts):
-    f = CONF_DIR / "config.json"
+    f = CONFIG_FILE
     cfg = read_json(f, {})
     cfg["calendar_accounts"] = accts
     write_json(f, cfg)
@@ -1397,7 +1498,7 @@ def cmd_account(a):
         if not re.fullmatch(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", cid):
             say("not an Application (client) ID: it looks like 00000000-0000-0000-0000-000000000000")
             return 1
-        f = CONF_DIR / "config.json"
+        f = CONFIG_FILE
         cfg = read_json(f, {})
         cfg["ms_client_id"] = cid.lower()
         write_json(f, cfg)
@@ -1479,7 +1580,7 @@ NOTE_TEXT = {
         "imported": "Importata dal file `{path}`.",
         "cut": "Audio tagliato prima della trascrizione: {a}–{b} (i tempi della trascrizione si riferiscono all'audio tagliato).",
         "cut_after": "Audio tagliato dopo la trascrizione: {a}–{b} (frasi di quel tratto tolte, tempi riallineati).",
-        "instructions": "Istruzioni date a Claude: _{text}_",
+        "instructions": "Istruzioni date all'AI: _{text}_",
         "removed": "Rimosso su richiesta: {a}–{b} ({n} frasi{audio}). {why}", "removed_audio": ", tolte anche dall'audio",
         "not_applied": "Istruzioni non applicate: {why}",
         "summary_h": "## Riassunto", "summary_note": "_Generato automaticamente dalla trascrizione: da verificare._",
@@ -1501,7 +1602,7 @@ NOTE_TEXT = {
         "imported": "Imported from the file `{path}`.",
         "cut": "Audio cut before the transcript: {a}–{b} (transcript times refer to the cut audio).",
         "cut_after": "Audio cut after the transcript: {a}–{b} (sentences in that part removed, times realigned).",
-        "instructions": "Instructions given to Claude: _{text}_",
+        "instructions": "Instructions given to the AI: _{text}_",
         "removed": "Removed on request: {a}–{b} ({n} sentences{audio}). {why}", "removed_audio": ", also from the audio",
         "not_applied": "Instructions not applied: {why}",
         "summary_h": "## Summary", "summary_note": "_Generated automatically from the transcript: to be checked._",
@@ -1528,7 +1629,7 @@ def others_label(lang):
     return "Others" if lang == "en" and o == "Altri" else o
 
 
-# ---------------------------------------------------------------- obsidian note
+# ---------------------------------------------------------------- notes: Markdown (plain or Obsidian), text, JSON, subtitles
 
 def slug_person(name):
     import unicodedata
@@ -1536,8 +1637,10 @@ def slug_person(name):
     return re.sub(r"[^a-z0-9]+", "_", n).strip("_")
 
 
-def people_links(event):
-    vault, pdir = Path(C["vault"]), C["people_dir"]
+def people_links(event, obsidian=True):
+    """attendees: [[links]] to person notes that exist (obsidian style), names otherwise"""
+    vault = Path(C["vault"] or C["output_dir"]) if C.get("vault") or C.get("output_dir") else None
+    pdir = C["people_dir"]
     me = my_emails()
     out, seen = [], set()
     for x in [event.get("organizer") or {}] + event.get("attendees", []):
@@ -1548,7 +1651,7 @@ def people_links(event):
         if slug in seen:
             continue
         seen.add(slug)
-        if (vault / pdir / f"{slug}.md").exists():
+        if obsidian and vault and (vault / pdir / f"{slug}.md").exists():
             out.append(f"[[{pdir}/{slug}|{slug}]]")
         else:
             out.append(name)
@@ -1635,61 +1738,86 @@ def yq(s):
     return json.dumps(s, ensure_ascii=False)
 
 
-def write_note(d, meta, event, turns, single_track, summary_line, summary_body):
+OUTPUT_FORMATS = ["md", "txt", "json", "srt", "vtt"]
+
+
+def output_files(d, meta, when, title):
+    """{format: path} for this recording: same folder and name for every format; re-processing
+    rewrites the same files"""
+    formats = [f for f in OUTPUT_FORMATS if f in (C.get("output_formats") or ["md"])] or ["md"]
+    prev = meta.get("note")
+    if prev:
+        p = Path(prev)
+        if p.parent.is_dir() and p.exists():
+            return {f: p.with_suffix("." + f) for f in formats}
+    if not C.get("output_dir"):
+        raise SystemExit(f"[meet] set the output folder: meet config set output_dir <folder> (or in the settings); file {CONFIG_FILE}")
+    folder = Path(C["output_dir"])
+    if C.get("output_layout", "month") == "month":
+        folder = folder / when.strftime("%Y-%m")
+    folder.mkdir(parents=True, exist_ok=True)
+    base = f"{when:%Y-%m-%d} - {safe_filename(title)}"
+    name, i = base, 2
+    while any((folder / f"{name}.{f}").exists() for f in formats):
+        name = f"{base} ({i})"
+        i += 1
+    return {f: folder / f"{name}.{f}" for f in formats}
+
+
+def note_info(d, meta, event, turns, single_track, summary_line, summary_body):
+    """everything a note says, independent of the format"""
     rec_start = dt.datetime.fromisoformat(meta["started_at"])
     rec_end = dt.datetime.fromisoformat(meta.get("stopped_at") or meta["started_at"])
     # the day of the meeting: what you typed for a manual event, else the recording day
     when = event["_start"] if event and event.get("manual") else rec_start
     title = (event or {}).get("subject") if event and event.get("manual") else None
     title = title or meta.get("title") or (event or {}).get("subject") or f"Meeting {rec_start:%H:%M}"
-    if not C["vault"]:
-        raise SystemExit(f"[meet] set 'vault' in {CONF_DIR / 'config.json'} (or in the MeetRec settings)")
-    vault = Path(C["vault"])
-    folder = vault / C["meetings_dir"] / when.strftime("%Y-%m")
-    folder.mkdir(parents=True, exist_ok=True)
-    base = f"{when:%Y-%m-%d} - {safe_filename(title)}"
-    note = folder / f"{base}.md"
-    prev = meta.get("note")
-    if prev and Path(prev).exists():
-        note = Path(prev)          # re-processing: update the same note
-    else:
-        i = 2
-        while note.exists():
-            note = folder / f"{base} ({i}).md"
-            i += 1
-
-    people = people_links(event) if event else []
-    dur = int((rec_end - rec_start).total_seconds() // 60)
     L = note_lang(meta)
-    summary_line = summary_line or NT(L, "default_summary", title=title)
-    fm = ["---", "type: meeting", f"context: {C['context']}", "status: done",
-          f"summary: {yq(summary_line)}", f"date: {when:%Y-%m-%d}", f"created: {dt.date.today()}"]
-    fm.append("people:" + ("" if people else " []"))
-    fm += [f"  - {yq(p)}" for p in people]
-    fm += ["tags: []", f"time: {yq(f'{rec_start:%H:%M}-{rec_end:%H:%M}')}", f"duration_min: {dur}",
-           f"recording: {yq(str(d / 'mix.m4a'))}", "source: " + ("meetrec-import" if meta.get("source_file") else "meetrec")]
-    if meta.get("voice_profile_applied"):
-        fm.append(f"voice_profile: {meta['voice_profile_applied']}")
-    if meta.get("source_file"):
-        fm.append(f"source_file: {yq(meta['source_file'])}")
-    if event:
-        fm += [f"calendar_subject: {yq(event.get('subject', ''))}",
-               "calendar_time: " + yq(f"{event['_start']:%H:%M}-{event['_end']:%H:%M}"),
-               f"calendar_link: {yq(event.get('link', ''))}",
-               f"calendar_source: {yq(event.get('source', ''))}"]
-    fm.append("---")
+    return {"d": d, "meta": meta, "event": event, "turns": turns, "single": single_track, "rec_start": rec_start,
+            "rec_end": rec_end, "when": when, "title": title, "lang": L,
+            "dur": int((rec_end - rec_start).total_seconds() // 60),
+            "summary_line": summary_line or NT(L, "default_summary", title=title), "summary_body": summary_body,
+            "has_summary": bool(summary_body)}
+
+
+def render_md(x, obsidian):
+    d, meta, event, L = x["d"], x["meta"], x["event"], x["lang"]
+    rec_start, rec_end, when, title, dur = x["rec_start"], x["rec_end"], x["when"], x["title"], x["dur"]
+    people = people_links(event, obsidian) if event else []
+    fm = []
+    if obsidian:
+        fm = ["---", "type: meeting", f"context: {C['context']}", "status: done",
+              f"summary: {yq(x['summary_line'])}", f"date: {when:%Y-%m-%d}", f"created: {dt.date.today()}"]
+        fm.append("people:" + ("" if people else " []"))
+        fm += [f"  - {yq(p)}" for p in people]
+        fm += ["tags: []", f"time: {yq(f'{rec_start:%H:%M}-{rec_end:%H:%M}')}", f"duration_min: {dur}",
+               f"recording: {yq(str(d / 'mix.m4a'))}", "source: " + ("meetrec-import" if meta.get("source_file") else "meetrec")]
+        if meta.get("voice_profile_applied"):
+            fm.append(f"voice_profile: {meta['voice_profile_applied']}")
+        if meta.get("source_file"):
+            fm.append(f"source_file: {yq(meta['source_file'])}")
+        if event:
+            fm += [f"calendar_subject: {yq(event.get('subject', ''))}",
+                   "calendar_time: " + yq(f"{event['_start']:%H:%M}-{event['_end']:%H:%M}"),
+                   f"calendar_link: {yq(event.get('link', ''))}",
+                   f"calendar_source: {yq(event.get('source', ''))}"]
+        fm.append("---")
 
     body = [f"# {title}", ""]
+    if not obsidian:
+        body += [f"**{when:%Y-%m-%d}**, {rec_start:%H:%M}-{rec_end:%H:%M} ({dur} min)", ""]
     if event:
         org = (event.get("organizer") or {}).get("name", "")
-        att = ", ".join(x.get("name") or x.get("email", "") for x in event.get("attendees", []))
+        att = ", ".join(people) if not obsidian and people else \
+            ", ".join(a.get("name") or a.get("email", "") for a in event.get("attendees", []))
         manual = bool(event.get("manual"))
         head = f"> **{event.get('subject', '')}**, {event['_start']:%d/%m/%Y %H:%M}-{event['_end']:%H:%M}"
         if event.get("link"):
             head += f" ([{NT(L, 'open_in_calendar')}]({event['link']}))"
         if not manual and event.get("source"):
             head += f" · {event['source']}"
-        body += ["> [!info] " + NT(L, "manual_block" if manual else "calendar_block"), head]
+        block = NT(L, "manual_block" if manual else "calendar_block")
+        body += [("> [!info] " + block) if obsidian else f"> _{block}_", head]
         if org:
             body.append(f"> {NT(L, 'organizer')}: {org}")
         if att:
@@ -1718,15 +1846,92 @@ def write_note(d, meta, event, turns, single_track, summary_line, summary_body):
                     audio=NT(L, "removed_audio") if meta.get("instructions_audio_cut") else "").rstrip(), ""]
     if meta.get("instructions_not_applied"):
         body += [NT(L, "not_applied", why=meta["instructions_not_applied"]), ""]
-    if summary_body:
-        body += [NT(L, "summary_h"), "", NT(L, "summary_note"), "",
-                 summary_body, ""]
-    who = NT(L, "single") if single_track else NT(L, "tracks", me=C["me"], others=others_label(L))
-    body += [NT(L, "transcript_h"), "",
-             NT(L, "transcript_note", who=who), "",
-             transcript_md(turns, single_track) or NT(L, "no_speech")]
-    note.write_text("\n".join(fm) + "\n" + "\n".join(body) + "\n")
-    return note
+    if x["summary_body"]:
+        if not obsidian:
+            body += [f"**{x['summary_line']}**", ""] if x["has_summary"] else []
+        body += [NT(L, "summary_h"), "", NT(L, "summary_note"), "", x["summary_body"], ""]
+    who = NT(L, "single") if x["single"] else NT(L, "tracks", me=C["me"], others=others_label(L))
+    body += [NT(L, "transcript_h"), "", NT(L, "transcript_note", who=who), "",
+             transcript_md(x["turns"], x["single"]) or NT(L, "no_speech")]
+    return ("\n".join(fm) + "\n" if fm else "") + "\n".join(body) + "\n"
+
+
+def render_txt(x):
+    L, event, when = x["lang"], x["event"], x["when"]
+    head = [x["title"], "=" * len(x["title"]), "",
+            f"{when:%Y-%m-%d} {x['rec_start']:%H:%M}-{x['rec_end']:%H:%M} ({x['dur']} min)"]
+    if event:
+        people = people_links(event, obsidian=False)
+        head.append(f"{NT(L, 'calendar_block')}: {event.get('subject', '')} {event['_start']:%H:%M}-{event['_end']:%H:%M}")
+        if people:
+            head.append(f"{NT(L, 'attendees')}: {', '.join(people)}")
+        agenda = invite_agenda(event)
+        if agenda:
+            head.append(f"{NT(L, 'agenda')}: {agenda[:1200]}")
+    head.append(f"Audio: {x['d'] / 'mix.m4a'}")
+    out = head + [""]
+    if x["summary_body"]:
+        h = NT(L, "summary_h").lstrip("# ")
+        out += [h, "-" * len(h), x["summary_line"], "", x["summary_body"], ""]
+    h = NT(L, "transcript_h").lstrip("# ")
+    out += [h, "-" * len(h)]
+    for t in x["turns"]:
+        out.append(f"[{hms(t['start'])}] " + ("" if x["single"] else f"{t['speaker']}: ") + t["text"])
+    return "\n".join(out) + "\n"
+
+
+def render_json(x):
+    e = x["event"]
+    data = {
+        "format": "meetrec-note", "version": 1, "title": x["title"], "language": x["lang"],
+        "date": f"{x['when']:%Y-%m-%d}", "start": x["rec_start"].isoformat(timespec="seconds"),
+        "end": x["rec_end"].isoformat(timespec="seconds"), "duration_min": x["dur"],
+        "recording": str(x["d"] / "mix.m4a"), "source_file": x["meta"].get("source_file"),
+        "event": None if not e else {
+            "subject": e.get("subject", ""), "start": e["_start"].isoformat(), "end": e["_end"].isoformat(),
+            "organizer": (e.get("organizer") or {}).get("name", ""), "manual": bool(e.get("manual")),
+            "attendees": [{"name": a.get("name", ""), "email": a.get("email", "")} for a in e.get("attendees", [])],
+            "agenda": invite_agenda(e), "link": e.get("link", ""), "source": e.get("source", "")},
+        "summary": {"line": x["summary_line"], "text": x["summary_body"]} if x["summary_body"] else None,
+        "instructions": x["meta"].get("instructions"), "removed": x["meta"].get("removed", []),
+        "speakers_separated": not x["single"],
+        "transcript": [{"start": round(t["start"], 2), "end": round(t["end"], 2), "speaker": t["speaker"] or None,
+                        "text": t["text"]} for t in x["turns"]],
+    }
+    return json.dumps(data, ensure_ascii=False, indent=2) + "\n"
+
+
+def _ts(sec, sep):
+    ms = int(round(sec * 1000))
+    return f"{ms // 3600000:02d}:{ms // 60000 % 60:02d}:{ms // 1000 % 60:02d}{sep}{ms % 1000:03d}"
+
+
+def render_srt(x):
+    out = []
+    for i, t in enumerate(x["turns"], 1):
+        who = "" if x["single"] else f"{t['speaker']}: "
+        out += [str(i), f"{_ts(t['start'], ',')} --> {_ts(max(t['end'], t['start'] + 0.5), ',')}", who + t["text"], ""]
+    return "\n".join(out)
+
+
+def render_vtt(x):
+    out = ["WEBVTT", ""]
+    for t in x["turns"]:
+        text = t["text"].replace("<", "&lt;")
+        out += [f"{_ts(t['start'], '.')} --> {_ts(max(t['end'], t['start'] + 0.5), '.')}",
+                (text if x["single"] else f"<v {t['speaker']}>{text}"), ""]
+    return "\n".join(out)
+
+
+def write_outputs(d, meta, event, turns, single_track, summary_line, summary_body):
+    """write the note in every chosen format; returns {format: path}"""
+    x = note_info(d, meta, event, turns, single_track, summary_line, summary_body)
+    files = output_files(d, meta, x["when"], x["title"])
+    render = {"md": lambda: render_md(x, C.get("md_style") == "obsidian"), "txt": lambda: render_txt(x),
+              "json": lambda: render_json(x), "srt": lambda: render_srt(x), "vtt": lambda: render_vtt(x)}
+    for f, path in files.items():
+        path.write_text(render[f]())
+    return files
 
 
 # ---------------------------------------------------------------- pipeline
@@ -1784,8 +1989,10 @@ def process(d, instructions=None):
     one, body = summarize(title, event, plain, meta.get("instructions"), note_lang(meta)) if turns else (None, None)
     apply_voice_profile(d, meta)          # transcription was made on the original audio
     meta = read_json(d / "meta.json", meta)
-    note = write_note(d, meta, event, turns, single, one, body)
+    files = write_outputs(d, meta, event, turns, single, one, body)
+    note = next(iter(files.values()))          # the main file: Markdown when chosen
     meta["note"] = str(note)
+    meta["outputs"] = [str(p) for p in files.values()]
     meta["turns"] = len(turns)
     meta["tracks"] = tracks
     meta["processed_at"] = now().isoformat(timespec="seconds")
@@ -1818,20 +2025,31 @@ def verify_processed(d):
     if not meta.get("processed_at"):
         return False, "not processed"
     note = Path(meta.get("note") or "")
-    if not note.is_file():
-        return False, f"note not found: {note}"
-    text = note.read_text()
-    if "## Trascrizione" not in text and "## Transcript" not in text:
-        return False, "the note has no transcript section"
-    if int(meta.get("turns") or 0) <= 0 or not re.search(r"^`\d\d:\d\d:\d\d`", text, re.M):
+    if int(meta.get("turns") or 0) <= 0:
         return False, "the transcript is empty"
+    for f in [Path(p) for p in meta.get("outputs") or [note]]:
+        if not f.is_file() or f.stat().st_size == 0:
+            return False, f"output not found or empty: {f}"
+        text = f.read_text()
+        if f.suffix == ".md" and (("## Trascrizione" not in text and "## Transcript" not in text)
+                                  or not re.search(r"^`\d\d:\d\d:\d\d`", text, re.M)):
+            return False, f"{f.name}: no transcript in it"
+        if f.suffix == ".json":
+            try:
+                if not json.loads(text).get("transcript"):
+                    return False, f"{f.name}: empty transcript"
+            except ValueError:
+                return False, f"{f.name}: not valid JSON"
+        if f.suffix in (".txt", ".srt", ".vtt") and not re.search(r"\d\d:\d\d:\d\d", text):
+            return False, f"{f.name}: no transcript in it"
     tr = d / "transcript.md"
     if not tr.is_file() or tr.stat().st_size == 0:
         return False, "transcript.md missing or empty"
     for n in meta.get("tracks") or []:
         if not (d / f"{n}.segments.json").is_file():
             return False, f"saved transcription of {n} missing"
-    return True, f"{meta['turns']} transcript lines in {note.name}"
+    n = len(meta.get("outputs") or [note])
+    return True, f"{meta['turns']} transcript lines in {note.name}" + (f" (+{n - 1} more formats)" if n > 1 else "")
 
 
 def drop_audio(d):
@@ -2387,6 +2605,190 @@ def cmd_ai(a):
     return 0
 
 
+# ---------------------------------------------------------------- configuration from the command line
+
+def parse_value(key, raw):
+    """text from the command line -> the value stored in config.json, checked against SCHEMA"""
+    kind, allowed, _ = SCHEMA.get(key, ("str", None, ""))
+    v = raw.strip()
+    if kind == "bool":
+        t = v.lower()
+        if t in ("true", "yes", "on", "1", "si", "sì"):
+            return True
+        if t in ("false", "no", "off", "0"):
+            return False
+        raise SystemExit(f"[meet] {key}: true or false")
+    if kind == "int":
+        try:
+            return int(v)
+        except ValueError:
+            raise SystemExit(f"[meet] {key}: a number") from None
+    if kind == "list":
+        items = [x.strip().lower().lstrip(".") for x in v.replace(" ", ",").split(",") if x.strip()]
+        bad = [x for x in items if allowed and x not in allowed]
+        if bad or not items:
+            raise SystemExit(f"[meet] {key}: one or more of {', '.join(allowed)} (comma separated)")
+        return items
+    if kind == "json":
+        return json.loads(v)
+    if kind == "str?" and v.lower() in ("", "null", "none", "default"):
+        return None
+    if allowed and v not in allowed:
+        raise SystemExit(f"[meet] {key}: one of {', '.join(allowed)}")
+    if kind == "path" and v:
+        return portable_path(v)
+    return v
+
+
+def config_problems(cfg):
+    out = []
+    for k, v in cfg.items():
+        if k.startswith("_"):                       # "_comment" and similar: notes for humans
+            continue
+        if k not in SCHEMA and k not in DEFAULTS:
+            out.append(f"{k}: unknown setting (kept, not used)")
+            continue
+        kind, allowed, _ = SCHEMA.get(k, ("any", None, ""))
+        if kind == "bool" and not isinstance(v, bool):
+            out.append(f"{k}: should be true or false")
+        elif kind == "int" and not isinstance(v, int):
+            out.append(f"{k}: should be a number")
+        elif kind == "list" and (not isinstance(v, list) or any(x not in allowed for x in v)):
+            out.append(f"{k}: should be a list of {', '.join(allowed)}")
+        elif kind == "choice" and v not in allowed:
+            out.append(f"{k}: {v!r} is not one of {', '.join(allowed)}")
+    for k in ("output_dir", "recordings_dir"):
+        v = xpath(cfg.get(k) or DEFAULTS.get(k, ""))
+        if v and Path(v).exists() and not Path(v).is_dir():
+            out.append(f"{k}: {v} is a file, not a folder")
+    return out
+
+
+def cmd_config(a):
+    cfg = read_config_file()
+    if a.action == "path":
+        print(CONFIG_FILE)
+        return 0
+    if a.action == "keys":
+        for k, (kind, allowed, what) in SCHEMA.items():
+            print(f"{k:22} {kind + (': ' + '|'.join(allowed) if allowed else ''):58} {what}")
+        return 0
+    if a.action in ("show", None):
+        shown = {k: C.get(k) for k in SCHEMA} if a.all else cfg
+        if a.json:
+            print(json.dumps(shown, ensure_ascii=False))
+        else:
+            print(f"# {CONFIG_FILE}" + ("  (effective values)" if a.all else ""))
+            print(json.dumps(shown, indent=2, ensure_ascii=False, sort_keys=True))
+        return 0
+    if a.action == "get":
+        if not a.key:
+            raise SystemExit("[meet] meet config get <key>")
+        v = C.get(a.key)
+        print(json.dumps(v, ensure_ascii=False) if not isinstance(v, str) else v)
+        return 0
+    if a.action == "set":
+        if not a.key or a.value is None:
+            raise SystemExit("[meet] meet config set <key> <value>   (meet config keys: the list)")
+        if a.key not in SCHEMA:
+            raise SystemExit(f"[meet] unknown setting {a.key!r}: meet config keys")
+        cfg[a.key] = parse_value(a.key, a.value)
+        write_config_file(cfg)
+        say(f"{a.key} = {json.dumps(cfg[a.key], ensure_ascii=False)}")
+        return 0
+    if a.action == "unset":
+        cfg.pop(a.key or "", None)
+        write_config_file(cfg)
+        say(f"{a.key} back to the default")
+        return 0
+    if a.action == "check":
+        probs = config_problems(cfg)
+        for p in probs:
+            print("  " + p)
+        say(f"{CONFIG_FILE}: " + ("OK" if not probs else f"{len(probs)} problem(s)"))
+        return 1 if probs else 0
+    if a.action == "export":
+        out = {k: v for k, v in cfg.items() if a.all or k not in MACHINE_KEYS}
+        for k in PATH_KEYS & out.keys():
+            if out[k]:
+                out[k] = portable_path(out[k])
+        text = json.dumps(out, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
+        if a.key:
+            Path(a.key).expanduser().write_text(text)
+            say(f"exported to {a.key} (no logins, keys or tokens: they stay on this computer)")
+        else:
+            print(text, end="")
+        return 0
+    if a.action == "import":
+        if not a.key:
+            raise SystemExit("[meet] meet config import <file> [--replace]")
+        new = json.loads(Path(a.key).expanduser().read_text())
+        if not isinstance(new, dict):
+            raise SystemExit("[meet] not a MeetRec config: a JSON object is expected")
+        probs = config_problems(new)
+        for p in probs:
+            print("  " + p)
+        if CONFIG_FILE.exists():
+            backup = CONFIG_FILE.with_name(f"config.{now():%Y%m%d-%H%M%S}.bak.json")
+            backup.write_text(CONFIG_FILE.read_text())
+            say(f"previous config saved as {backup.name}")
+        merged = new if a.replace else {**cfg, **new}
+        if not a.replace:              # settings tied to this computer stay as they are
+            for k in MACHINE_KEYS & cfg.keys():
+                merged[k] = cfg[k]
+        write_config_file(merged)
+        say(f"imported {len(new)} settings into {CONFIG_FILE}")
+        return 0
+    raise SystemExit(f"[meet] unknown action {a.action}")
+
+
+def cmd_init(a):
+    """a few questions, then config.json is ready (Enter keeps the value in brackets)"""
+    if not sys.stdin.isatty():
+        raise SystemExit("[meet] meet init asks questions: run it in a terminal (or use meet config set)")
+    cfg = read_config_file()
+
+    def ask(key, question, choices=None):
+        cur = cfg.get(key, DEFAULTS.get(key))
+        shown = ",".join(cur) if isinstance(cur, list) else ("" if cur is None else cur)
+        hint = f" ({'/'.join(choices)})" if choices else ""
+        while True:
+            ans = input(f"{question}{hint} [{shown}]: ").strip()
+            if not ans:
+                return
+            try:
+                cfg[key] = parse_value(key, ans)
+                return
+            except SystemExit as e:
+                print(f"  {e}")
+
+    print(f"MeetRec setup: answers go to {CONFIG_FILE}\n")
+    ask("output_dir", "Folder for notes and transcripts (an Obsidian vault folder works too)")
+    ask("output_formats", "Formats, comma separated", OUTPUT_FORMATS)
+    ask("md_style", "Markdown style: plain, or obsidian (frontmatter, [[people]] links)", ["plain", "obsidian"])
+    if cfg.get("md_style") == "obsidian":
+        ask("vault", "Obsidian vault root (to link person notes)")
+    ask("output_layout", "Subfolder per month, or all in one folder", ["month", "flat"])
+    ask("recordings_dir", "Folder for the audio")
+    ask("language", "Meeting language", ["it", "en"])
+    ask("me", "Your label in the transcript")
+    ask("ai_provider", "AI for the summary", SCHEMA["ai_provider"][1])
+    if cfg.get("ai_provider") not in (None, "none", "claude-code", "codex", "command"):
+        ask("ai_model", "Model")
+    if cfg.get("ai_provider") == "openai-compatible":
+        ask("ai_base_url", "Service URL (ending in /v1)")
+    ask("summary", "Automatic summary", ["true", "false"])
+    write_config_file(cfg)
+    probs = config_problems(cfg)
+    for p in probs:
+        print("  " + p)
+    say(f"saved {CONFIG_FILE}")
+    if cfg.get("ai_provider") in ("anthropic", "openai", "openai-compatible"):
+        say(f"API key: meet ai key {cfg['ai_provider']}")
+    say("check it: meet config check; copy it to another computer: meet config export <file> / meet config import <file>")
+    return 0
+
+
 def main():
     p = argparse.ArgumentParser(prog="meet", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--version", action="version", version=f"MeetRec {app_version()}")
@@ -2454,6 +2856,15 @@ def main():
     sub.add_parser("login")
     sub.add_parser("logout")
     sub.add_parser("whoami")
+    s = sub.add_parser("config", help="settings: show | path | keys | get <k> | set <k> <v> | unset <k> | check | export [file] | import <file>")
+    s.add_argument("action", nargs="?", default="show",
+                   choices=["show", "path", "keys", "get", "set", "unset", "check", "export", "import"])
+    s.add_argument("key", nargs="?")
+    s.add_argument("value", nargs="?")
+    s.add_argument("--all", action="store_true", help="show: effective values; export: also the settings tied to this computer")
+    s.add_argument("--json", action="store_true")
+    s.add_argument("--replace", action="store_true", help="import: replace the whole file instead of merging")
+    sub.add_parser("init", help="answer a few questions to create or update the configuration")
     s = sub.add_parser("ai", help="AI for summary and instructions: status | key <provider> [--delete] | test")
     s.add_argument("action", nargs="?", default="status", choices=["status", "key", "test"])
     s.add_argument("provider", nargs="?", default="")
@@ -2474,7 +2885,7 @@ def main():
     a = p.parse_args()
     return {"start": cmd_start, "rec": cmd_rec, "stop": cmd_stop, "discard": cmd_discard, "status": cmd_status, "process": cmd_process, "prepare": cmd_prepare, "peaks": cmd_peaks, "cut": cmd_cut, "edit": cmd_edit, "list": cmd_list, "import": cmd_import,
             "recover": cmd_recover, "candidates": cmd_candidates, "choose": cmd_choose,
-            "accounts": cmd_accounts, "now": cmd_now, "account": cmd_account, "login": cmd_login, "logout": cmd_logout, "whoami": cmd_whoami, "ai": cmd_ai, "events": cmd_events, "mics": cmd_mics,
+            "accounts": cmd_accounts, "now": cmd_now, "account": cmd_account, "login": cmd_login, "logout": cmd_logout, "whoami": cmd_whoami, "ai": cmd_ai, "config": cmd_config, "init": cmd_init, "events": cmd_events, "mics": cmd_mics,
             "verify": cmd_verify, "drop-audio": cmd_drop_audio, "voice-test": cmd_voice_test}[a.cmd](a)
 
 

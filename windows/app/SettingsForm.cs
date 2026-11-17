@@ -14,7 +14,9 @@ sealed class SettingsForm : Form
     readonly Label saved = new() { AutoSize = true, ForeColor = SystemColors.GrayText, Margin = new Padding(0, 8, 10, 0) };
     readonly Action? openSetup;
 
-    TextBox recordingsDir = null!, vault = null!, meetingsDir = null!, peopleDir = null!, context = null!;
+    TextBox recordingsDir = null!, vault = null!, outputDir = null!, peopleDir = null!, context = null!;
+    ComboBox layout = null!, mdStyle = null!;
+    readonly Dictionary<string, CheckBox> formats = new();
     ComboBox ui = null!, mic = null!, lang = null!, record = null!, transcript = null!, voice = null!, scope = null!, after = null!;
     CheckBox keepRaw = null!, keepTracks = null!, callPrompt = null!, summary = null!, atLogin = null!;
     ComboBox aiProvider = null!;
@@ -85,8 +87,10 @@ sealed class SettingsForm : Form
         var b = new Button { Text = T("choose"), AutoSize = true };
         b.Click += (_, _) =>
         {
-            using var d = new FolderBrowserDialog { SelectedPath = t.Text, ShowNewFolderButton = true };
-            if (d.ShowDialog(this) == DialogResult.OK) t.Text = d.SelectedPath;
+            string start = "";
+            try { start = Shell.ExpandPath(t.Text); } catch { }
+            using var d = new FolderBrowserDialog { SelectedPath = start, ShowNewFolderButton = true };
+            if (d.ShowDialog(this) == DialogResult.OK) t.Text = Shell.PortablePath(d.SelectedPath);
         };
         p.Controls.Add(t); p.Controls.Add(b);
         box = t;
@@ -135,11 +139,32 @@ sealed class SettingsForm : Form
         after = Row(T("after_audio"), Grid.Combo(new[] { ("ask", T("after_audio_ask")), ("keep", T("after_audio_keep")), ("delete", T("after_audio_delete")) },
                                                  S(raw, "after_process_audio", "ask")));
 
-        Section("Obsidian");
-        PathRow(T("setup_vault"), S(raw, "vault", ""), out vault);
-        meetingsDir = Row(T("meetings_folder_relative_to_vault"), new TextBox { Text = S(raw, "meetings_dir", ""), Width = 300 });
-        peopleDir = Row(T("people_folder_relative_to_vault"), new TextBox { Text = S(raw, "people_dir", ""), Width = 300 });
+        Section(T("output_section"));
+        var vaultValue = S(raw, "vault", "");
+        // configs from before 1.9 had <vault>/<meetings_dir>; meet migrates them on its first run
+        var outValue = raw["output_dir"] != null ? S(raw, "output_dir", "")
+                     : vaultValue.Length > 0 ? vaultValue + "/" + S(raw, "meetings_dir", "Meetings") : "~/Documents/MeetRec";
+        PathRow(T("output_folder"), outValue, out outputDir);
+        Row("", new Label { Text = T("output_hint"), AutoSize = true, MaximumSize = new Size(480, 0), ForeColor = SystemColors.GrayText });
+        var chosen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try { foreach (var x in raw["output_formats"] as JsonArray ?? new JsonArray("md")) chosen.Add(x!.GetValue<string>()); } catch { chosen.Add("md"); }
+        var fmtRow = new FlowLayoutPanel { AutoSize = true, WrapContents = true, MaximumSize = new Size(520, 0), Margin = Padding.Empty };
+        foreach (var (tag, key) in Program.OutputFormats)
+        {
+            var cb = new CheckBox { Text = T(key), Checked = chosen.Contains(tag), AutoSize = true };
+            formats[tag] = cb;
+            fmtRow.Controls.Add(cb);
+        }
+        Row(T("output_formats"), fmtRow);
+        layout = Row(T("output_layout"), Grid.Combo(new[] { ("month", T("layout_month")), ("flat", T("layout_flat")) }, S(raw, "output_layout", "month"), 260));
+        var styleDefault = raw["output_dir"] == null && vaultValue.Length > 0 ? "obsidian" : "plain";
+        mdStyle = Row(T("md_style"), Grid.Combo(new[] { ("plain", T("md_plain")), ("obsidian", T("md_obsidian")) }, S(raw, "md_style", styleDefault), 420));
+        PathRow(T("obsidian_vault"), vaultValue, out vault);
+        peopleDir = Row(T("people_folder_relative_to_vault"), new TextBox { Text = S(raw, "people_dir", "People"), Width = 300 });
         context = Row(T("frontmatter_context"), new TextBox { Text = S(raw, "context", "work"), Width = 160 });
+        void StyleChanged() { vault.Enabled = peopleDir.Enabled = context.Enabled = Grid.Selected(mdStyle) == "obsidian"; }
+        mdStyle.SelectedIndexChanged += (_, _) => StyleChanged();
+        StyleChanged();
 
         BuildAi();
 
@@ -151,6 +176,13 @@ sealed class SettingsForm : Form
         Section(T("system"));
         atLogin = Check(T("open_meetrec_at_login"), LaunchAtLogin());
         atLogin.CheckedChanged += (_, _) => SetLaunchAtLogin(atLogin.Checked);
+        var cfgRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = Padding.Empty };
+        cfgRow.Controls.Add(new TextBox { Text = Paths.ConfigFile, ReadOnly = true, Width = 300 });
+        var reveal = new Button { Text = T("config_reveal"), AutoSize = true };
+        reveal.Click += (_, _) => System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{Paths.ConfigFile}\"");
+        cfgRow.Controls.Add(reveal);
+        Row(T("config_file"), cfgRow);
+        Row("", new Label { Text = T("config_hint"), AutoSize = true, MaximumSize = new Size(480, 0), ForeColor = SystemColors.GrayText });
         var priv = Row("", new Button { Text = T("microphone_permission"), AutoSize = true });
         priv.Click += (_, _) => Shell.Open("ms-settings:privacy-microphone");
 
@@ -270,9 +302,13 @@ sealed class SettingsForm : Form
 
     void Save()
     {
-        raw["recordings_dir"] = recordingsDir.Text.Trim();
-        raw["vault"] = vault.Text.Trim();
-        raw["meetings_dir"] = meetingsDir.Text.Trim();
+        raw["recordings_dir"] = Shell.PortablePath(recordingsDir.Text);
+        raw["vault"] = Shell.PortablePath(vault.Text);
+        raw["output_dir"] = Shell.PortablePath(outputDir.Text);
+        var fmts = Program.OutputFormats.Where(f => formats[f.tag].Checked).Select(f => (JsonNode)f.tag!).ToArray();
+        raw["output_formats"] = new JsonArray(fmts.Length > 0 ? fmts : new JsonNode[] { "md" });
+        raw["output_layout"] = Grid.Selected(layout);
+        raw["md_style"] = Grid.Selected(mdStyle);
         raw["people_dir"] = peopleDir.Text.Trim();
         raw["context"] = context.Text.Trim();
         raw["language"] = Grid.Selected(lang);

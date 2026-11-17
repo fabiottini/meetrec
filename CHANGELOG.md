@@ -4,6 +4,20 @@ Versions follow [Semantic Versioning](https://semver.org/): MAJOR.MINOR.PATCH.
 MAJOR for changes that break existing use (config, CLI, notes), MINOR for new features,
 PATCH for fixes. Every release has a git tag `vX.Y.Z` (`make tag`).
 
+## 1.9.0 – 2026-11-17
+
+- **No Obsidian needed**: notes and transcripts go to a folder you choose (`output_dir`, default
+  `Documents/MeetRec`), in the formats you choose: Markdown, text, JSON, SRT and WebVTT subtitles.
+  Markdown is plain or Obsidian style (frontmatter, callouts, links to people); month subfolders or
+  one folder. Existing configs are migrated by themselves (same folder, Obsidian style).
+- **Everything from the command line**: `meet init` (a few questions), `meet config`
+  show/get/set/unset/check/keys, `meet config export` / `import` to copy the settings to another
+  computer (logins and keys stay out; settings tied to the computer are kept on import).
+- **One portable settings file** read at startup by `meet` and both apps: paths with `~` and
+  environment variables, saved as `~/…`; `MEETREC_CONFIG_FILE` to use another file; shown in
+  Settings > System.
+- The notes open in Obsidian only in Obsidian style, otherwise with the default app.
+
 ## 1.8.0 – 2026-11-13
 
 - **AI of your choice** for the summary and the instructions (Settings > AI, macOS and Windows):

@@ -358,7 +358,7 @@ sealed class TrayApp : ApplicationContext
 
     void OpenRecordings()
     {
-        var dir = Config.Str("recordings_dir", Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Recordings", "meetings"));
+        var dir = Shell.ExpandPath(Config.Str("recordings_dir", "~/Recordings/meetings"));
         Directory.CreateDirectory(dir);
         Shell.Open(dir);
     }
