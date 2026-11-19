@@ -281,6 +281,7 @@
   "setup_win_cli_done": "Added {path} to PATH: open a new terminal and run meet",
   "setup_win_extracting": "Extracting {file}",
   "setup_win_ffmpeg_detail": "To download (about 100 MB): converts and mixes the audio",
+  "setup_win_ffmpeg_fallback": "gyan.dev did not answer: trying the second source (BtbN/FFmpeg-Builds on GitHub, about 200 MB)",
   "setup_win_mic_after": "After allowing the microphone, press Check again.",
   "setup_win_mic_blocked": "Blocked: allow desktop apps in Settings > Privacy & security > Microphone",
   "setup_win_python_missing": "Not found: unzip MeetRec again (Python is inside the zip)",
