@@ -77,8 +77,11 @@ jobs:
           & ./out/meetrec-capture.exe --list-mics
           "exit $LASTEXITCODE"
 
-      - name: ffmpeg (same download as the app setup)
+      - name: ffmpeg from the setup's second source (FFmpeg-Builds on GitHub), so both sources are tested
         shell: pwsh
+        env:
+          FFMPEG_SOURCE: btbn
+          GH_TOKEN: ${{ github.token }}
         run: python windows/ci_ffmpeg.py
 
       - name: Synthetic recording through the real writer and stop protocol

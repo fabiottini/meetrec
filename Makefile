@@ -10,7 +10,7 @@ PYTHON ?= $(shell command -v /opt/homebrew/bin/python3 || command -v python3)
 .DEFAULT_GOAL := help
 VERSION := $(shell tr -d ' \n' < VERSION)
 
-.PHONY: after-install help build install install-zip open cli check docs release uninstall clean version bump-patch bump-minor bump-major tag sync-github release-github github-hardening
+.PHONY: after-install hero help build install install-zip open cli check docs release uninstall clean version bump-patch bump-minor bump-major tag sync-github release-github github-hardening
 
 help: ## list the targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  make %-12s %s\n", $$1, $$2}'
@@ -56,6 +56,9 @@ check: ## syntax check of meet.py, locale keys, Info.plist, config example
 docs: build ## render the README images (docs/*.png) from the app, in English
 	MEETREC_CONFIG_FILE=docs/demo-config.json $(APP)/Contents/MacOS/MeetRec --render-docs "$(CURDIR)/docs"
 	ffmpeg -loglevel error -y -i docs/settings.png -vf "crop=iw:ih-24:0:0" docs/settings.tmp.png && mv docs/settings.tmp.png docs/settings.png
+
+hero: ## docs/hero.gif, the flow at the top of the README, from the docs images (needs Pillow: pip install pillow)
+	python3 scripts/make_hero.py
 
 release: check docs ## check + build + docs; then commit (zip and docs included), push a branch, open the MR
 	@grep -q "^## $(VERSION) " CHANGELOG.md || echo "remember: CHANGELOG.md section for $(VERSION) (and make bump-* if needed)"

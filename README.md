@@ -2,6 +2,8 @@
 
 # MeetRec
 
+<p align="center"><img src="docs/hero.gif" width="900" alt="MeetRec: record from the menu bar, pick the meeting, optionally cut the audio, get the note with summary and transcript"></p>
+
 Records meetings on your Mac or Windows PC (your voice and the other participants' voices) and transcribes them
 **locally** with [whisper.cpp](https://github.com/ggml-org/whisper.cpp). It links each recording to
 the calendar event (Microsoft, Google, iCloud… as many accounts as you want) and saves the note and
@@ -16,6 +18,7 @@ There are two ways to use it, and they share the same state:
 > **Personal project, free and open source, shared as is.** MIT license, no support and no
 > warranty: you use it at your own risk (see [CONTRIBUTING.md](CONTRIBUTING.md#no-warranty-no-liability)).
 > Issues and pull requests are welcome, answers are not guaranteed. macOS; Windows 10/11 in beta.
+> Read the [Known limits](#known-limits) before you start.
 >
 > Home: [github.com/fabiottini/meetrec](https://github.com/fabiottini/meetrec): issues and pull
 > requests there.
@@ -864,11 +867,43 @@ the AI you choose for the optional summary (your own account or key).
 
 ## Known limits
 
-- All the other participants share one track, so they are not told apart.
-- Without headphones the microphone also picks up the speakers. Duplicate sentences are filtered,
-  but with headphones the transcript is cleaner.
-- The app is ad-hoc signed, so after each new build macOS may ask for the permissions again.
-- The Windows app is not signed: SmartScreen warns the first time (More info > Run anyway).
+Said up front, so nobody finds out the hard way:
+
+**Platforms and installation**
+- **macOS 15 or later** (Apple Silicon and Intel) and **Windows 10/11 64-bit in beta**. The Windows
+  version runs the same `meet.py` and is tested on Windows at every change (CI: recording with
+  synthetic audio, the app's flow from import to note, transcription end to end) and on a real PC,
+  but it has had far less use than the Mac one. No Linux app (the `meet` command may work, untested).
+- **The apps are not signed**: macOS asks you to allow MeetRec once (System Settings > Privacy &
+  Security > Open Anyway), Windows shows SmartScreen (More info > Run anyway), and some antivirus
+  programs may flag an unsigned app. On macOS the permissions may be asked again after each update,
+  because the app is ad-hoc signed.
+- **About 2 GB to download** the first time (speech model 1.6 GB, plus ffmpeg and whisper.cpp on
+  Windows).
+
+**Transcription**
+- **The other participants are not told apart**: you are one track, everybody else is the second
+  one ("Others"). No speaker identification.
+- **Meeting language: Italian or English** (notes, headings and summary in that language).
+- **Without headphones** the microphone also hears the speakers: duplicates are filtered, but with
+  headphones the transcript is cleaner.
+- **Speed depends on the computer**: on a MacBook Pro M3 an 11-minute call is transcribed in about
+  1.5 minutes (see [Fast and offline](#fast-and-offline)); on Windows whisper.cpp runs on the CPU
+  (no GPU build), so it is slower.
+- It is an automatic transcript: names and technical terms can be wrong.
+
+**Optional parts**
+- **Calendars** need a one-time setup: your own free Microsoft app registration, or your own Google
+  OAuth client (Setup has a step-by-step guide for both). Without them you type the meeting yourself.
+- **The summary** needs an AI provider (Claude Code, Codex, an API key, or a local model through an
+  OpenAI-compatible service such as Ollama). Without it the note has the transcript only, and
+  everything stays offline.
+
+**Project**
+- Personal project, MIT license, shared as is: no support and no warranty, issues and pull requests
+  welcome but answers are not guaranteed.
+- Recording a conversation may require the consent of the others where you are: see
+  [Privacy and consent](#privacy-and-consent).
 
 ## Contributing
 

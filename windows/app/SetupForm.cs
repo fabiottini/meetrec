@@ -360,13 +360,26 @@ sealed class SetupForm : Form
         }
     }
 
+    /// ffmpeg from gyan.dev (essentials build, ~100 MB, checked with the .sha256 it publishes); when gyan.dev
+    /// does not answer, from the FFmpeg-Builds GitHub releases (static build of the newest stable
+    /// branch, ~200 MB, checked with the SHA-256 digest GitHub keeps for every release file)
     async Task InstallFfmpeg()
     {
         var zip = Path.Combine(Paths.DataDir, "ffmpeg.zip");
-        string? sha = null;
-        try { sha = (await http.GetStringAsync(FfmpegUrl + ".sha256")).Trim().Split(' ')[0]; }     // published by gyan.dev
-        catch (Exception e) { AddLog("✖ ffmpeg .sha256: " + e.Message); }
-        if (sha is { Length: 64 } && await Download(FfmpegUrl, zip, "ffmpeg", sha))
+        bool ok = false;
+        try
+        {
+            var sha = (await http.GetStringAsync(FfmpegUrl + ".sha256")).Trim().Split(' ')[0];
+            ok = sha.Length == 64 && await Download(FfmpegUrl, zip, "ffmpeg", sha);
+        }
+        catch (Exception e) { AddLog("✖ gyan.dev: " + e.Message); }
+        if (!ok)
+        {
+            AddLog(T("setup_win_ffmpeg_fallback"));
+            var (url, sha) = await FfmpegFallback();
+            ok = url != null && sha != null && await Download(url, zip, "ffmpeg", sha);
+        }
+        if (ok)
         {
             SetBusy(T("setup_win_extracting", ("file", "ffmpeg.exe")));
             await Task.Run(() =>
@@ -380,6 +393,23 @@ sealed class SetupForm : Form
         }
         SetBusy(null);
         BuildChecks();
+    }
+
+    async Task<(string? url, string? sha)> FfmpegFallback()
+    {
+        try
+        {
+            var rel = JsonNode.Parse(await http.GetStringAsync("https://api.github.com/repos/FFmpeg-Builds/FFmpeg-Builds/releases/latest")) as JsonObject;
+            var best = (rel?["assets"] as JsonArray)?.OfType<JsonObject>()
+                .Select(a => (a, m: Regex.Match(a["name"]?.GetValue<string>() ?? "", @"^ffmpeg-n(\d+)\.(\d+)-latest-win64-gpl-[\d.]+\.zip$")))
+                .Where(x => x.m.Success)
+                .OrderByDescending(x => int.Parse(x.m.Groups[1].Value)).ThenByDescending(x => int.Parse(x.m.Groups[2].Value))
+                .Select(x => x.a).FirstOrDefault();
+            var digest = best?["digest"]?.GetValue<string>() ?? "";
+            if (best == null || !digest.StartsWith("sha256:")) { AddLog("✖ FFmpeg-Builds: no checked build found"); return (null, null); }
+            return (best["browser_download_url"]!.GetValue<string>(), digest[7..]);
+        }
+        catch (Exception e) { AddLog("✖ FFmpeg-Builds: " + e.Message); return (null, null); }
     }
 
     async Task InstallWhisper()

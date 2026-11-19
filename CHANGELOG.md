@@ -4,6 +4,13 @@ Versions follow [Semantic Versioning](https://semver.org/): MAJOR.MINOR.PATCH.
 MAJOR for changes that break existing use (config, CLI, notes), MINOR for new features,
 PATCH for fixes. Every release has a git tag `vX.Y.Z` (`make tag`).
 
+## 1.10.2 – 2026-11-19
+
+- Windows setup: when gyan.dev does not answer, ffmpeg comes from a second source (FFmpeg-Builds
+  on GitHub, checked with the SHA-256 digest GitHub keeps); CI tests both sources.
+- README: an animation of the whole flow at the top (`make hero`), a complete **Known limits**
+  section (platforms, unsigned apps, transcription, optional parts), linked from the introduction.
+
 ## 1.10.1 – 2026-11-17
 
 Windows fixes after the first test on a real PC.
