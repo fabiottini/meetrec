@@ -6,7 +6,7 @@ PATCH for fixes. Every release has a git tag `vX.Y.Z` (`make tag`).
 
 ## 1.10.2 – 2026-11-19
 
-- Windows setup: when gyan.dev does not answer, ffmpeg comes from a second source (BtbN/FFmpeg-Builds
+- Windows setup: when gyan.dev does not answer, ffmpeg comes from a second source (FFmpeg-Builds
   on GitHub, checked with the SHA-256 digest GitHub keeps); CI tests both sources.
 - README: an animation of the whole flow at the top (`make hero`), a complete **Known limits**
   section (platforms, unsigned apps, transcription, optional parts), linked from the introduction.

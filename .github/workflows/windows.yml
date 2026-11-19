@@ -77,7 +77,7 @@ jobs:
           & ./out/meetrec-capture.exe --list-mics
           "exit $LASTEXITCODE"
 
-      - name: ffmpeg from the setup's second source (BtbN on GitHub), so both sources are tested
+      - name: ffmpeg from the setup's second source (FFmpeg-Builds on GitHub), so both sources are tested
         shell: pwsh
         env:
           FFMPEG_SOURCE: btbn

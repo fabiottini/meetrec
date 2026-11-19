@@ -1,5 +1,5 @@
 """CI: ffmpeg.exe with the same sources and checks as the Windows setup, put on PATH for the next steps.
-gyan.dev first (checked with its .sha256), BtbN/FFmpeg-Builds on GitHub when gyan.dev fails (checked
+gyan.dev first (checked with its .sha256), FFmpeg-Builds on GitHub when gyan.dev fails (checked
 with the GitHub release digest). FFMPEG_SOURCE=btbn uses the second one directly, so CI tests both."""
 import hashlib
 import json
@@ -27,7 +27,7 @@ def btbn():
     if os.environ.get("GH_TOKEN"):
         h["Authorization"] = "Bearer " + os.environ["GH_TOKEN"]
     rel = json.load(urllib.request.urlopen(urllib.request.Request(
-        "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest", headers=h)))
+        "https://api.github.com/repos/FFmpeg-Builds/FFmpeg-Builds/releases/latest", headers=h)))
     best = None
     for a in rel["assets"]:
         m = re.match(r"^ffmpeg-n(\d+)\.(\d+)-latest-win64-gpl-[\d.]+\.zip$", a["name"])     # same rule as the setup
@@ -44,7 +44,7 @@ else:
     try:
         fetch(GYAN, urllib.request.urlopen(GYAN + ".sha256").read().decode().split()[0])
     except Exception as e:
-        print("gyan.dev failed:", e, "-> BtbN")
+        print("gyan.dev failed:", e, "-> FFmpeg-Builds")
         btbn()
 with zipfile.ZipFile(zpath) as z:
     entry = next(n for n in z.namelist() if n.lower().endswith("/ffmpeg.exe"))

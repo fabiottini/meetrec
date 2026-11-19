@@ -361,7 +361,7 @@ sealed class SetupForm : Form
     }
 
     /// ffmpeg from gyan.dev (essentials build, ~100 MB, checked with the .sha256 it publishes); when gyan.dev
-    /// does not answer, from the BtbN/FFmpeg-Builds GitHub releases (static build of the newest stable
+    /// does not answer, from the FFmpeg-Builds GitHub releases (static build of the newest stable
     /// branch, ~200 MB, checked with the SHA-256 digest GitHub keeps for every release file)
     async Task InstallFfmpeg()
     {
@@ -399,17 +399,17 @@ sealed class SetupForm : Form
     {
         try
         {
-            var rel = JsonNode.Parse(await http.GetStringAsync("https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest")) as JsonObject;
+            var rel = JsonNode.Parse(await http.GetStringAsync("https://api.github.com/repos/FFmpeg-Builds/FFmpeg-Builds/releases/latest")) as JsonObject;
             var best = (rel?["assets"] as JsonArray)?.OfType<JsonObject>()
                 .Select(a => (a, m: Regex.Match(a["name"]?.GetValue<string>() ?? "", @"^ffmpeg-n(\d+)\.(\d+)-latest-win64-gpl-[\d.]+\.zip$")))
                 .Where(x => x.m.Success)
                 .OrderByDescending(x => int.Parse(x.m.Groups[1].Value)).ThenByDescending(x => int.Parse(x.m.Groups[2].Value))
                 .Select(x => x.a).FirstOrDefault();
             var digest = best?["digest"]?.GetValue<string>() ?? "";
-            if (best == null || !digest.StartsWith("sha256:")) { AddLog("✖ BtbN: no checked build found"); return (null, null); }
+            if (best == null || !digest.StartsWith("sha256:")) { AddLog("✖ FFmpeg-Builds: no checked build found"); return (null, null); }
             return (best["browser_download_url"]!.GetValue<string>(), digest[7..]);
         }
-        catch (Exception e) { AddLog("✖ BtbN: " + e.Message); return (null, null); }
+        catch (Exception e) { AddLog("✖ FFmpeg-Builds: " + e.Message); return (null, null); }
     }
 
     async Task InstallWhisper()
